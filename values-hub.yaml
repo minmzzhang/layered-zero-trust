@@ -1,3 +1,14 @@
+global:
+  localClusterDomain: apps.cluster1.local.lab
+
+spire:
+  oidcDiscoveryProvider:
+    ingress:
+      enabled: true
+      annotations:
+        route.openshift.io/termination: reencrypt
+        route.openshift.io/destination-ca-certificate-secret: spire-bundle
+
 clusterGroup:
   name: hub
   isHubCluster: true

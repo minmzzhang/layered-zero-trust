@@ -165,6 +165,11 @@ spec:
 {{- else }}
         - name: QUARKUS_CONFIG_LOCATIONS
           value: file:/run/secrets/db-credentials/credentials.properties
+        - name: QUARKUS_OIDC_CREDENTIALS_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oidc-client-secret
+              key: client-secret
 {{- end }}
 {{- if eq .Values.app.spire.enabled true }}
         volumeMounts:

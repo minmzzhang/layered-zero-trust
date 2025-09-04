@@ -24,19 +24,34 @@ app:
       pullPolicy: IfNotPresent
 
   oidc:
-    enabled: false
+    enabled: false  # Will be enabled when SPIFFE is enabled
     authServerUrl: ""
     clientId: qtodo-app
-    clientSecret: ""
     applicationType: "web-app"
     authenticatedPaths: "/*"
     authenticatedPolicy: "authenticated"
   
+  # Keycloak realm configuration
+  keycloak:
+    realm: "ztvp"
+  
   spire:
-    enabled: false
+    enabled: true   # Enable SPIFFE + OIDC integration by default
     sidecars: true
     audiences:
       - qtodo
+      
+  # Vault configuration for SPIFFE integration
+  vault:
+    url: ""
+    role: "qtodo-role" 
+    secretPath: "secret/data/global/keycloak-users"
+
+  # OIDC External Secret configuration
+  oidcSecret:
+    enabled: true
+    name: "oidc-client-secret"
+    vaultPath: "secret/data/global/oidc-client-secret"
 
 # PostgreSQL database configuration
 postgresql:

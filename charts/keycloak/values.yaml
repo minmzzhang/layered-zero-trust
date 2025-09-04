@@ -38,7 +38,9 @@ keycloak:
     clients:
       - clientId: "qtodo-app"
         name: "qtodo"
-        publicClient: true
+        publicClient: false
+        standardFlowEnabled: true
+        secret: "${QTODO_CLIENT_SECRET}"
         redirectUris:
           - "*"
         webOrigins:

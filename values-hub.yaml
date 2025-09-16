@@ -1,3 +1,5 @@
+global:
+  localClusterDomain: apps.ztvp.local.lab
 # This spire config is required to fix a bug in the zero-trust-workload-identity-manager operator
 spire:
   oidcDiscoveryProvider:

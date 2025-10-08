@@ -18,6 +18,22 @@ keycloak:
       standardFlowEnabled: true
       webOrigins:
       - +
+    - clientId: trusted-artifact-signer
+      enabled: true
+      name: Red Hat Trusted Artifact Signer Client
+      protocol: openid-connect
+      publicClient: true
+      redirectUris:
+      - '*'
+      - 'urn:ietf:wg:oauth:2.0:oob'
+      - 'http://localhost:*/auth/callback'
+      directAccessGrantsEnabled: true
+      standardFlowEnabled: true
+      implicitFlowEnabled: false
+      webOrigins:
+      - +
+      attributes:
+        oauth2.device.authorization.grant.enabled: 'true'
     displayName: ZTVP Realm
     enabled: true
     realm: ztvp
@@ -59,6 +75,19 @@ keycloak:
       requiredActions:
       - UPDATE_PASSWORD
       username: qtodo-user1
+    - createdTimestamp: 1
+      credentials:
+      - temporary: false
+        type: password
+        value: ${RHTAS_USER_PASSWORD}
+      email: rhtas-user@example.com
+      emailVerified: true
+      enabled: true
+      firstName: RHTAS
+      lastName: Signer
+      realmRoles:
+      - viewer
+      username: rhtas-user
   ingress:
     enabled: true
     service: keycloak-service-trusted

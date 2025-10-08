@@ -1,0 +1,105 @@
+{{- if .Values.rhtas.securesign.enabled }}
+---
+apiVersion: rhtas.redhat.com/v1alpha1
+kind: Securesign
+metadata:
+  name: {{ .Values.rhtas.securesign.name }}
+  namespace: {{ .Values.rhtas.namespace }}
+  labels:
+    {{- include "rhtas-operator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"  # Deploy after namespace and operator
+    {{- if .Values.rhtas.monitoring.enabled }}
+    rhtas.redhat.com/metrics: "true"
+    {{- end }}
+spec:
+  # Fulcio - Certificate Authority
+  fulcio:
+    certificate:
+      commonName: {{ .Values.rhtas.certificate.commonName }}
+      organizationName: {{ .Values.rhtas.certificate.organizationName }}
+      organizationEmail: {{ .Values.rhtas.certificate.organizationEmail }}
+    config:
+      OIDCIssuers:
+        - ClientID: "trusted-artifact-signer"
+          Issuer: "{{ include "rhtas-operator.keycloakOIDCIssuer" . }}"
+          IssuerURL: "{{ include "rhtas-operator.keycloakOIDCIssuer" . }}"
+          Type: "email"
+    externalAccess:
+      enabled: {{ .Values.rhtas.externalAccess.enabled }}
+    {{- if .Values.rhtas.monitoring.enabled }}
+    monitoring:
+      enabled: true
+    {{- end }}
+
+  # Rekor - Transparency Log
+  rekor:
+    externalAccess:
+      enabled: {{ .Values.rhtas.externalAccess.enabled }}
+    {{- if .Values.rhtas.monitoring.enabled }}
+    monitoring:
+      enabled: true
+    {{- end }}
+
+  # Trillian - Database backend for transparency logs
+  trillian:
+    database:
+      create: {{ .Values.rhtas.database.create }}
+    {{- if .Values.rhtas.monitoring.enabled }}
+    monitoring:
+      enabled: true
+    {{- end }}
+
+  # Certificate Transparency Log
+  ctlog:
+    {{- if .Values.rhtas.monitoring.enabled }}
+    monitoring:
+      enabled: true
+    {{- end }}
+
+  {{- if .Values.rhtas.tuf.enabled }}
+  # TUF - The Update Framework 
+  tuf:
+    externalAccess:
+      enabled: {{ .Values.rhtas.externalAccess.enabled }}
+    keys:
+      {{- range .Values.rhtas.tuf.keys }}
+      - name: {{ . | quote }}
+      {{- end }}
+    pvc:
+      accessModes: {{ .Values.rhtas.tuf.accessModes }}
+      retain: true
+      size: {{ .Values.rhtas.tuf.storageSize }}
+    rootKeySecretRef:
+      name: "tuf-root-keys"
+  {{- end }}
+
+  {{- if .Values.rhtas.tsa.enabled }}
+  # TSA - Timestamp Authority
+  tsa:
+    externalAccess:
+      enabled: {{ .Values.rhtas.externalAccess.enabled }}
+    {{- if .Values.rhtas.monitoring.enabled }}
+    monitoring:
+      enabled: true
+    {{- end }}
+    {{- if .Values.rhtas.tsa.ntpMonitoring.enabled }}
+    ntpMonitoring:
+      enabled: true
+    {{- end }}
+    signer:
+      certificateChain:
+        rootCA:
+          commonName: "{{ .Values.rhtas.tsa.certificate.commonName }}-root"
+          organizationName: {{ .Values.rhtas.tsa.certificate.organizationName }}
+          organizationEmail: {{ .Values.rhtas.tsa.certificate.organizationEmail }}
+        intermediateCA:
+          - commonName: "{{ .Values.rhtas.tsa.certificate.commonName }}-intermediate"
+            organizationName: {{ .Values.rhtas.tsa.certificate.organizationName }}
+            organizationEmail: {{ .Values.rhtas.tsa.certificate.organizationEmail }}
+        leafCA:
+          commonName: "{{ .Values.rhtas.tsa.certificate.commonName }}-leaf"
+          organizationName: {{ .Values.rhtas.tsa.certificate.organizationName }}
+          organizationEmail: {{ .Values.rhtas.tsa.certificate.organizationEmail }}
+  {{- end }}
+{{- end }}

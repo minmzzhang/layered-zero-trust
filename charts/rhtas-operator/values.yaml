@@ -1,0 +1,70 @@
+# Red Hat Trusted Artifact Signer (RHTAS) Operator Configuration
+# Uses the RHTAS Operator to deploy and manage RHTAS components
+# Integrates with Zero Trust architecture: SPIRE, Vault, Keycloak
+
+rhtas:
+  namespace: trusted-artifact-signer
+  
+  # Zero Trust Integration
+  zeroTrust:
+    spire:
+      enabled: true
+      trustDomain: "apps.example.com"
+    vault:
+      enabled: true
+      url: "https://vault.vault.svc.cluster.local:8200" 
+      role: "rhtas"
+      secretPath: "secret/data/global/rhtas"
+    keycloak:
+      enabled: true
+      url: "https://keycloak.apps.example.com"  # MUST be public route URL (overridden in values-hub.yaml)
+      realm: "ztvp"
+
+  # Securesign Configuration - Main RHTAS Operator Resource
+  securesign:
+    enabled: true
+    name: "trusted-artifact-signer"
+  
+  # Certificate configuration for Fulcio and TSA
+  certificate:
+    organizationName: "Red Hat Zero Trust Validated Patterns"
+    organizationEmail: "ztvp-arch-group@redhat.com"
+    commonName: "fulcio"
+  
+  # Monitoring configuration
+  monitoring:
+    enabled: true
+  
+  # External access configuration
+  externalAccess:
+    enabled: true
+  
+  # Database configuration for Trillian
+  database:
+    create: true
+  
+  # TUF configuration
+  tuf:
+    enabled: true
+    storageSize: "1Gi"
+    accessModes:
+      - ReadWriteOnce
+    keys:
+      - "rekor.pub"
+      - "ctfe.pub" 
+      - "fulcio_v1.crt.pem"
+      - "tsa.certchain.pem"
+  
+  # Timestamp Authority configuration
+  tsa:
+    enabled: true
+    ntpMonitoring:
+      enabled: true
+    certificate:
+      organizationName: "Red Hat Zero Trust Validated Patterns"
+      organizationEmail: "ztvp-arch-group@redhat.com"
+      commonName: "tsa"
+
+# Global Configuration
+global:
+  imageRegistry: registry.redhat.io

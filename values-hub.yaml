@@ -1,5 +1,5 @@
 # Hub Configuration (Default)
-# This is the default configuration with optional Layer 1 components (Quay) commented out
+# This is the default configuration with optional Layer 1 components (Quay, RHTAS) commented out
 # To deploy with optional components, uncomment the relevant sections below
 
 # This spire config is required to fix a bug in the zero-trust-workload-identity-manager operator
@@ -36,6 +36,12 @@ clusterGroup:
     # - quay-enterprise:
     #     annotations:
     #       argocd.argoproj.io/sync-wave: "1"  # Create before NooBaa and all Quay components
+    #     labels:
+    #       openshift.io/cluster-monitoring: "true"
+    # UNCOMMENT if you want to deploy RHTAS
+    # - trusted-artifact-signer:
+    #     annotations:
+    #       argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
     #     labels:
     #       openshift.io/cluster-monitoring: "true"
     - zero-trust-workload-identity-manager:
@@ -88,6 +94,12 @@ clusterGroup:
     #   channel: stable-3.15
     #   annotations:
     #     argocd.argoproj.io/sync-wave: "-3"  # Layer 1: Install after ODF operator
+    # UNCOMMENT for RHTAS operator subscriptions
+    # rhtas-operator:
+    #   name: rhtas-operator
+    #   namespace: openshift-operators
+    #   channel: stable
+    #   catalogSource: redhat-operators
   projects:
     - hub
   # Explicitly mention the cluster-state based overrides we plan to use for this pattern.
@@ -146,6 +158,12 @@ clusterGroup:
             subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/qtodo/sa/qtodo
             policies:
               - global-secret
+          # UNCOMMENT for RHTAS vault role
+          # - name: rhtas
+          #   audience: rhtas
+          #   subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-artifact-signer/sa/*
+          #   policies:
+          #     - global-secret
     # UNCOMMENT for Quay applications
     # noobaa-mcg:
     #   name: noobaa-mcg
@@ -161,6 +179,21 @@ clusterGroup:
     #   path: charts/quay-registry
     #   annotations:
     #     argocd.argoproj.io/sync-wave: "10"  # Layer 1: Deploy after NooBaa
+    # UNCOMMENT for RHTAS applications
+    # rhtas:
+    #   name: rhtas
+    #   namespace: trusted-artifact-signer
+    #   project: hub
+    #   path: charts/rhtas-operator
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "5"  
+    #   overrides:
+    #     - name: rhtas.zeroTrust.spire.trustDomain
+    #       value: "apps.{{ $.Values.global.clusterDomain }}"
+    #     - name: rhtas.zeroTrust.vault.url
+    #       value: https://vault.vault.svc.cluster.local:8200
+    #     - name: rhtas.zeroTrust.keycloak.url
+    #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}              
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets

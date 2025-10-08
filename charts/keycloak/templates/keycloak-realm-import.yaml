@@ -26,6 +26,10 @@ spec:
       secret:
         name: {{ $.Values.keycloak.users.secretName }}
         key: qtodo-user1-password
+    RHTAS_USER_PASSWORD:
+      secret:
+        name: {{ $.Values.keycloak.users.secretName }}
+        key: rhtas-user-password
     QTODO_CLIENT_SECRET:
       secret:
         name: oidc-client-secret

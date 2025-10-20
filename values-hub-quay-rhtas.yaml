@@ -1,0 +1,315 @@
+# Hub Configuration for RHTAS Submission (With Quay and RHTAS enabled)
+# This configuration includes both Quay Registry + NooBaa MOG and RHTAS components
+# Usage: TARGET_SITE=hub-rhtas-quay-enabled ./pattern.sh make install
+
+# This spire config is required to fix a bug in the zero-trust-workload-identity-manager operator
+spire:
+  oidcDiscoveryProvider:
+    ingress:
+      enabled: true
+      annotations:
+        route.openshift.io/termination: reencrypt
+        route.openshift.io/destination-ca-certificate-secret: spire-bundle
+
+clusterGroup:
+  name: hub
+  isHubCluster: true
+  namespaces:
+    - open-cluster-management
+    - vault
+    - qtodo
+    - golang-external-secrets
+    - keycloak-system:
+        operatorGroup: true
+        targetNamespace: keycloak-system
+    - cert-manager
+    - cert-manager-operator:
+        operatorGroup: true
+        targetNamespace: cert-manager-operator
+    # Layer 1 Quay namespaces
+    - openshift-storage:
+        operatorGroup: true
+        targetNamespace: openshift-storage
+        annotations:
+          openshift.io/cluster-monitoring: "true"
+          argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
+    - quay-enterprise:
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"  # Create before NooBaa and all Quay components
+        labels:
+          openshift.io/cluster-monitoring: "true"
+    # Layer 1 RHTAS namespaces 
+    - rhtas-operator:
+        operatorGroup: true
+    - rhtas-system:
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"  # Create before all RHTAS components
+        labels:
+          openshift.io/cluster-monitoring: "true"
+          name: rhtas-system
+    - zero-trust-workload-identity-manager:
+        operatorGroup: true
+        targetNamespace: zero-trust-workload-identity-manager
+    - openshift-compliance:
+        operatorGroup: true
+        targetNamespace: openshift-compliance
+        annotations:
+          openshift.io/cluster-monitoring: "true"
+  subscriptions:
+    acm:
+      name: advanced-cluster-management
+      namespace: open-cluster-management
+      channel: release-2.14
+      catalogSource: redhat-operators
+    cert-manager:
+      name: openshift-cert-manager-operator
+      namespace: cert-manager-operator
+      channel: stable-v1
+      catalogSource: redhat-marketplace
+    rhbk:
+      name: rhbk-operator
+      namespace: keycloak-system
+      channel: stable-v26.2
+      catalogSource: redhat-marketplace
+    zero-trust-workload-identity-manager:
+      name: openshift-zero-trust-workload-identity-manager
+      namespace: zero-trust-workload-identity-manager
+      channel: tech-preview-v0.2
+      catalogSource: redhat-marketplace
+    compliance-operator:
+      name: compliance-operator
+      namespace: openshift-compliance
+      channel: stable
+      catalogSource: redhat-marketplace
+      config:
+        nodeSelector:
+          node-role.kubernetes.io/worker: ""
+    # Layer 1 Quay operator subscriptions
+    odf:
+      name: odf-operator
+      namespace: openshift-storage
+      channel: stable-4.19
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Layer 1: Install after OperatorGroup (-5)
+    quay-operator:
+      name: quay-operator
+      namespace: openshift-operators
+      channel: stable-3.15
+      annotations:
+        argocd.argoproj.io/sync-wave: "-3"  # Layer 1: Install after ODF operator
+    # Layer 1 RHTAS operator subscriptions
+    rhtas-operator:
+      name: rhtas-operator
+      namespace: openshift-operators
+      channel: stable
+      catalogSource: redhat-operators
+  projects:
+    - hub
+  # Explicitly mention the cluster-state based overrides we plan to use for this pattern.
+  # We can use self-referential variables because the chart calls the tpl function with these variables defined
+  sharedValueFiles:
+    - '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml'
+  applications:
+    acm:
+      name: acm
+      namespace: open-cluster-management
+      project: hub
+      chart: acm
+      chartVersion: 0.1.*
+      ignoreDifferences:
+        - group: internal.open-cluster-management.io
+          kind: ManagedClusterInfo
+          jsonPointers:
+            - /spec/loggingCA
+    compliance-scanning:
+      name: compliance-scanning
+      namespace: openshift-compliance
+      annotations:
+        argocd.argoproj.io/sync-wave: '-30'
+      project: hub
+      path: charts/compliance-scanning
+    vault:
+      name: vault
+      namespace: vault
+      project: hub
+      chart: hashicorp-vault
+      chartVersion: 0.1.*
+      jwt:
+        enabled: true
+        oidcDiscoveryUrl: https://spire-spiffe-oidc-discovery-provider.zero-trust-workload-identity-manager.svc.cluster.local
+        oidcDiscoveryCa: /run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+        defaultRole: qtodo
+        roles:
+          - name: qtodo
+            audience: qtodo
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/qtodo/sa/qtodo
+            policies:
+              - global-secret
+          - name: rhtas
+            audience: rhtas
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtas-system/sa/*
+            policies:
+              - global-secret
+    # Layer 1 Quay applications
+    noobaa-mcg:
+      name: noobaa-mcg
+      namespace: openshift-storage
+      project: hub
+      path: charts/noobaa-mcg
+      annotations:
+        argocd.argoproj.io/sync-wave: "5"  # Layer 1: Deploy after core services
+    quay-registry:
+      name: quay-registry
+      namespace: quay-enterprise
+      project: hub
+      path: charts/quay-registry
+      annotations:
+        argocd.argoproj.io/sync-wave: "10"  # Layer 1: Deploy after NooBaa
+    # Layer 1 RHTAS applications
+    rhtas:
+      name: rhtas
+      namespace: rhtas-system
+      project: hub
+      path: charts/rhtas-operator
+      annotations:
+        argocd.argoproj.io/sync-wave: "5"  
+      overrides:
+        - name: rhtas.zeroTrust.spire.trustDomain
+          value: "apps.{{ $.Values.global.clusterDomain }}"
+        - name: rhtas.zeroTrust.vault.url
+          value: https://vault.vault.svc.cluster.local:8200
+        - name: rhtas.zeroTrust.keycloak.url
+          value: https://keycloak-service.keycloak-system.svc.cluster.local:8443
+    golang-external-secrets:
+      name: golang-external-secrets
+      namespace: golang-external-secrets
+      project: hub
+      chart: golang-external-secrets
+      chartVersion: 0.1.*
+    rh-keycloak:
+      name: rh-keycloak
+      namespace: keycloak-system
+      project: hub
+      path: charts/keycloak
+    rh-cert-manager:
+      name: rh-cert-manager
+      namespace: cert-manager-operator
+      project: hub
+      path: charts/certmanager
+    zero-trust-workload-identity-manager:
+      name: zero-trust-workload-identity-manager
+      namespace: zero-trust-workload-identity-manager
+      project: hub
+      path: charts/zero-trust-workload-identity-manager
+      overrides:
+        - name: spire.clusterName
+          value: hub
+    qtodo:
+      name: qtodo
+      namespace: qtodo
+      project: hub
+      path: charts/qtodo
+      overrides:
+        - name: app.oidc.enabled
+          value: "true"
+        - name: app.spire.enabled
+          value: "true"
+        - name: app.vault.url
+          value: https://vault.vault.svc.cluster.local:8200
+        - name: app.vault.role
+          value: qtodo
+        - name: app.vault.secretPath
+          value: secret/data/global/qtodo
+
+  imperative:
+    # NOTE: We *must* use lists and not hashes. As hashes lose ordering once parsed by helm
+    # The default schedule is every 10 minutes: imperative.schedule
+    # Total timeout of all jobs is 1h: imperative.activeDeadlineSeconds
+    # imagePullPolicy is set to always: imperative.imagePullPolicy
+    # For additional overrides that apply to the jobs, please refer to
+    # https://hybrid-cloud-patterns.io/imperative-actions/#additional-job-customizations
+    jobs: []
+  managedClusterGroups: {}
+    # exampleRegion:
+    #   name: group-one
+    #   acmlabels:
+    #     - name: clusterGroup
+    #       value: group-one
+    #   helmOverrides:
+    #     - name: clusterGroup.isHubCluster
+    #       value: false
+          # Before enabling cluster provisioning, ensure AWS and/or Azure
+          #   credentials and OCP pull secrets are defined in Vault.
+          #   See values-secret.yaml.template
+          #
+          #clusterPools:
+          #  exampleAWSPool:
+          #    name: aws-ap
+          #    openshiftVersion: 4.10.18
+          #    baseDomain: blueprints.rhecoeng.com
+          #    platform:
+          #      aws:
+          #        region: ap-southeast-2
+          #    clusters:
+          #    - One
+          #
+          #  exampleAzurePool:
+          #    name: azure-us
+          #    openshiftVersion: 4.10.18
+          #    baseDomain: blueprints.rhecoeng.com
+          #    platform:
+          #      azure:
+          #        baseDomainResourceGroupName: dojo-dns-zones
+          #        region: eastus
+          #    clusters:
+          #    - Two
+          #    - Three
+#  To have apps in multiple flavors, use namespaces and use helm overrides as appropriate
+#
+#    pipelines:
+#      name: pipelines
+#      namespace: production
+#      project: datacenter
+#      path: applications/pipeline
+#      repoURL: https://github.com/you/applications.git
+#      targetRevision: stable
+#      overrides:
+#      - name: myparam
+#        value: myparam
+#
+#    pipelines_staging:
+#    - name: pipelines
+#      namespace: staging
+#      project: datacenter
+#      path: applications/pipeline
+#      repoURL: https://github.com/you/applications.git
+#      targetRevision: main
+#
+#   Additional applications
+#   Be sure to include additional resources your apps will require
+#   +X machines
+#   +Y RAM
+#   +Z CPU
+#    vendor-app:
+#      name: vendor-app
+#      namespace: default
+#      project: vendor
+#      path: path/to/myapp
+#      repoURL: https://github.com/vendor/applications.git
+#      targetRevision: main
+
+#  managedSites:
+#    factory:
+#      name: factory
+#      # repoURL: https://github.com/dagger-refuse-cool/manuela-factory.git
+#      targetRevision: main
+#      path: applications/factory
+#      helmOverrides:
+#      - name: site.isHubCluster
+#        value: false
+#      clusterSelector:
+#        matchExpressions:
+#        - key: vendor
+#          operator: In
+#          values:
+#            - OpenShift

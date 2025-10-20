@@ -18,7 +18,7 @@ rhtas:
     keycloak:
       enabled: true
       url: "https://keycloak.keycloak-system.svc.cluster.local:8443"
-      realm: "validated-patterns"
+      realm: "ztvp"
 
   # Securesign Configuration - Main RHTAS Operator Resource
   securesign:

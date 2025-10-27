@@ -39,11 +39,11 @@ clusterGroup:
         labels:
           openshift.io/cluster-monitoring: "true"
     # UNCOMMENT if you want to deploy RHTAS
-     - trusted-artifact-signer:
-         annotations:
-           argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
-         labels:
-           openshift.io/cluster-monitoring: "true"
+    - trusted-artifact-signer:
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
+        labels:
+          openshift.io/cluster-monitoring: "true"
     - zero-trust-workload-identity-manager:
         operatorGroup: true
         targetNamespace: zero-trust-workload-identity-manager

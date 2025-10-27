@@ -22,13 +22,8 @@ spec:
     config:
       OIDCIssuers:
         - ClientID: "trusted-artifact-signer"
-          {{- if .Values.rhtas.zeroTrust.keycloak.enabled }}
           Issuer: "{{ .Values.rhtas.zeroTrust.keycloak.url }}/realms/{{ .Values.rhtas.zeroTrust.keycloak.realm }}"
           IssuerURL: "{{ .Values.rhtas.zeroTrust.keycloak.url }}/realms/{{ .Values.rhtas.zeroTrust.keycloak.realm }}"
-          {{- else }}
-          Issuer: "https://your-oidc-issuer-url"
-          IssuerURL: "https://your-oidc-issuer-url" 
-          {{- end }}
           Type: "email"
     externalAccess:
       enabled: {{ .Values.rhtas.externalAccess.enabled }}

@@ -39,14 +39,11 @@ clusterGroup:
         labels:
           openshift.io/cluster-monitoring: "true"
     # UNCOMMENT if you want to deploy RHTAS
-    - rhtas-operator:
-        operatorGroup: true
-    - rhtas-system:
-       annotations:
-         argocd.argoproj.io/sync-wave: "1"  # Create before all RHTAS components
-       labels:
-         openshift.io/cluster-monitoring: "true"
-         name: rhtas-system
+     - trusted-artifact-signer:
+         annotations:
+           argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
+         labels:
+           openshift.io/cluster-monitoring: "true"
     - zero-trust-workload-identity-manager:
         operatorGroup: true
         targetNamespace: zero-trust-workload-identity-manager
@@ -164,7 +161,7 @@ clusterGroup:
           # UNCOMMENT for RHTAS vault role
           - name: rhtas
             audience: rhtas
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtas-system/sa/*
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-artifact-signer/sa/*
             policies:
               - global-secret
     # UNCOMMENT for Quay applications
@@ -185,7 +182,7 @@ clusterGroup:
     # UNCOMMENT for RHTAS applications
     rhtas:
       name: rhtas
-      namespace: rhtas-system
+      namespace: trusted-artifact-signer
       project: hub
       path: charts/rhtas-operator
       annotations:
@@ -196,7 +193,7 @@ clusterGroup:
         - name: rhtas.zeroTrust.vault.url
           value: https://vault.vault.svc.cluster.local:8200
         - name: rhtas.zeroTrust.keycloak.url
-          value: https://keycloak-service.keycloak-system.svc.cluster.local:8443              
+          value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}              
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets

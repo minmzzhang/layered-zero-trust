@@ -3,7 +3,7 @@
 # Integrates with Zero Trust architecture: SPIRE, Vault, Keycloak
 
 rhtas:
-  namespace: rhtas-system
+  namespace: trusted-artifact-signer
   
   # Zero Trust Integration
   zeroTrust:
@@ -17,7 +17,7 @@ rhtas:
       secretPath: "secret/data/global/rhtas"
     keycloak:
       enabled: true
-      url: "https://keycloak.keycloak-system.svc.cluster.local:8443"
+      url: "https://keycloak.apps.example.com"  # MUST be public route URL (overridden in values-hub.yaml)
       realm: "ztvp"
 
   # Securesign Configuration - Main RHTAS Operator Resource

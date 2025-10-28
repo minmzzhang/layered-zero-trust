@@ -50,3 +50,13 @@ Selector labels
 app.kubernetes.io/name: {{ include "rhtas-operator.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Generate the Keycloak OIDC Issuer URL
+This evaluates any template variables (like {{ $.Values.global.clusterDomain }})
+and appends the realm name.
+*/}}
+{{- define "rhtas-operator.keycloakOIDCIssuer" -}}
+{{- $keycloakUrl := tpl .Values.rhtas.zeroTrust.keycloak.url . -}}
+{{- printf "%s/realms/%s" $keycloakUrl .Values.rhtas.zeroTrust.keycloak.realm -}}
+{{- end }}

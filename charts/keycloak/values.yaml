@@ -26,6 +26,7 @@ keycloak:
       redirectUris:
       - '*'
       - 'urn:ietf:wg:oauth:2.0:oob'
+      - 'http://localhost:*/auth/callback'
       directAccessGrantsEnabled: true
       standardFlowEnabled: true
       implicitFlowEnabled: false

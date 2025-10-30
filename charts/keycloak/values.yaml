@@ -18,9 +18,9 @@ keycloak:
       standardFlowEnabled: true
       webOrigins:
       - +
-    - clientId: sigstore
+    - clientId: trusted-artifact-signer
       enabled: true
-      name: Sigstore Client (RHTAS)
+      name: Red Hat Trusted Artifact Signer Client
       protocol: openid-connect
       publicClient: true
       redirectUris:

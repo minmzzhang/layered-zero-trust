@@ -21,7 +21,7 @@ spec:
       organizationEmail: {{ .Values.rhtas.certificate.organizationEmail }}
     config:
       OIDCIssuers:
-        - ClientID: "sigstore"
+        - ClientID: "trusted-artifact-signer"
           Issuer: "{{ include "rhtas-operator.keycloakOIDCIssuer" . }}"
           IssuerURL: "{{ include "rhtas-operator.keycloakOIDCIssuer" . }}"
           Type: "email"

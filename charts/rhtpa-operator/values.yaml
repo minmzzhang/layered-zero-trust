@@ -1,0 +1,72 @@
+# Red Hat Trusted Profile Analyzer (RHTPA) Operator Configuration
+# Uses the RHTPA Operator to deploy and manage Trustification services
+# Integrates with Zero Trust architecture: SPIRE, Vault, Keycloak, NooBaa
+
+rhtpa:
+  # Enable/disable RHTPA deployment
+  enabled: true
+  
+  # TrustedProfileAnalyzer CR name
+  name: "trusted-profile-analyzer"
+  
+  # Namespace for RHTPA deployment
+  namespace: rhtpa-system
+  
+  # Zero Trust Integration
+  zeroTrust:
+    spire:
+      enabled: true
+      trustDomain: "apps.example.com"
+    vault:
+      enabled: true
+      url: "https://vault.vault.svc.cluster.local:8200" 
+      role: "rhtpa"
+      secretPath: "secret/data/global/rhtpa"
+    keycloak:
+      enabled: true
+      url: "https://keycloak.apps.example.com"  # MUST be public route URL (overridden in values-hub.yaml)
+      realm: "ztvp"
+      namespace: "keycloak-system"  # Namespace where Keycloak is deployed
+      instanceName: "keycloak"  # Name of the Keycloak CR
+      userPasswordVaultKey: "secret/data/global/keycloak-users"  # Vault path for RHTPA user password
+  
+  # TLS Configuration
+  tls:
+    ingressCA:
+      enabled: true  # Mount OpenShift ingress CA certificate
+      certificate: ""  # PEM-encoded certificate (will be populated from ingress secret)
+  
+  # PostgreSQL Database Configuration
+  database:
+    create: true
+    name: "rhtpa"
+    username: "rhtpa"
+    secretName: "rhtpa-db-secret"
+    passwordVaultKey: "secret/data/global/rhtpa"
+    storageSize: "10Gi"
+    image: "registry.redhat.io/rhel8/postgresql-16"
+  
+  # Object Storage Configuration (NooBaa MCG)
+  objectStorage:
+    enabled: true
+    region: "us-east-1"  # NooBaa default region
+    objectBucketClaim:
+      name: "rhtpa-s3-storage"
+      bucketName: "rhtpa-blob-storage"
+      storageClass: "openshift-storage.noobaa.io"
+  
+  # Monitoring configuration
+  monitoring:
+    enabled: true
+  
+  # External access configuration
+  externalAccess:
+    enabled: true
+
+# Global Configuration
+global:
+  imageRegistry: registry.redhat.io
+  secretStore:
+    name: "vault-backend"
+    kind: "ClusterSecretStore"
+

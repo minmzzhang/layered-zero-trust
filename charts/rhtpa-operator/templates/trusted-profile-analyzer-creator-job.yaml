@@ -1,0 +1,83 @@
+{{- if .Values.rhtpa.enabled }}
+---
+# ServiceAccount for the CR creator job
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+---
+# Role for creating TrustedProfileAnalyzer CR
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+- apiGroups: ["rhtpa.io"]
+  resources: ["trustedprofileanalyzers"]
+  verbs: ["get", "create", "patch", "update"]
+- apiGroups: ["objectbucket.io"]
+  resources: ["objectbucketclaims"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rhtpa-cr-creator
+subjects:
+- kind: ServiceAccount
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+---
+# Job to create TrustedProfileAnalyzer CR with real credentials
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"  # After database and storage are ready
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      name: rhtpa-cr-creator
+    spec:
+      serviceAccountName: rhtpa-cr-creator
+      restartPolicy: OnFailure
+      volumes:
+      - name: script
+        configMap:
+          name: rhtpa-cr-creator-script
+          defaultMode: 0755
+      containers:
+      - name: create-cr
+        image: registry.redhat.io/openshift4/ose-cli:latest
+        command:
+        - /bin/bash
+        - /scripts/create-cr.sh
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+{{- end }}
+

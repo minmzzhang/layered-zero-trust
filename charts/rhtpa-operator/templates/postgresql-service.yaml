@@ -1,0 +1,23 @@
+{{- if .Values.rhtpa.database.create }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: '10'
+  labels:
+    app: rhtpa-db
+  name: rhtpa-db
+  namespace: {{ .Values.rhtpa.namespace }}
+spec:
+  ports:
+  - name: postgresql
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: rhtpa-db
+  sessionAffinity: None
+  type: ClusterIP
+{{- end }}
+

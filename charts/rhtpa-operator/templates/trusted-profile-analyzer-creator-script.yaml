@@ -1,0 +1,119 @@
+{{- if .Values.rhtpa.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rhtpa-cr-creator-script
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+data:
+  create-cr.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Waiting for secrets to be ready..."
+    
+    # Wait for database secret
+    for i in {1..60}; do
+      if oc get secret {{ .Values.rhtpa.database.secretName }} -n {{ .Values.rhtpa.namespace }} >/dev/null 2>&1; then
+        echo "Database secret found"
+        break
+      fi
+      echo "Waiting for database secret... ($i/60)"
+      sleep 5
+    done
+    
+    # Wait for S3 secret (OBC)
+    for i in {1..60}; do
+      if oc get secret {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }} -n {{ .Values.rhtpa.namespace }} >/dev/null 2>&1; then
+        echo "S3 secret found"
+        break
+      fi
+      echo "Waiting for S3 secret... ($i/60)"
+      sleep 5
+    done
+    
+    echo "Extracting credentials..."
+    
+    # Get database password
+    DB_PASSWORD=$(oc get secret {{ .Values.rhtpa.database.secretName }} -n {{ .Values.rhtpa.namespace }} -o jsonpath='{.data.password}' | base64 -d)
+    
+    # Get S3 credentials
+    S3_ACCESS_KEY=$(oc get secret {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }} -n {{ .Values.rhtpa.namespace }} -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)
+    S3_SECRET_KEY=$(oc get secret {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }} -n {{ .Values.rhtpa.namespace }} -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)
+    S3_BUCKET=$(oc get obc {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }} -n {{ .Values.rhtpa.namespace }} -o jsonpath='{.spec.bucketName}')
+    
+    echo "Credentials extracted. DB password length: ${#DB_PASSWORD}"
+    
+    # Check if CR already exists
+    if oc get trustedprofileanalyzer {{ .Values.rhtpa.name }} -n {{ .Values.rhtpa.namespace }} >/dev/null 2>&1; then
+      echo "TrustedProfileAnalyzer CR already exists, skipping creation"
+      exit 0
+    fi
+    
+    echo "Creating TrustedProfileAnalyzer CR with real credentials..."
+    
+    # Create the CR with real credentials (NOT PLACEHOLDER!)
+    # Use bash variable substitution (envsubst not available in ose-cli image)
+    cat <<EOFTEMPLATE | oc apply -f -
+    apiVersion: rhtpa.io/v1
+    kind: TrustedProfileAnalyzer
+    metadata:
+      name: {{ .Values.rhtpa.name }}
+      namespace: {{ .Values.rhtpa.namespace }}
+      labels:
+        {{- include "rhtpa-operator.labels" . | nindent 8 }}
+    spec:
+      appDomain: {{ .Values.global.localClusterDomain | quote }}
+      
+      {{- if .Values.rhtpa.tls.ingressCA.enabled }}
+      tls:
+        additionalTrustAnchor: /etc/rhtpa/tls/ca.crt
+      {{- end }}
+      
+      {{- if .Values.rhtpa.zeroTrust.keycloak.enabled }}
+      oidc:
+        clients:
+          frontend:
+            issuerUrl: {{ include "rhtpa-operator.keycloakOIDCIssuer" . | quote }}
+          cli:
+            issuerUrl: {{ include "rhtpa-operator.keycloakOIDCIssuer" . | quote }}
+            clientSecret: ""
+      {{- end }}
+      
+      migrateDatabase: {}
+      
+      modules:
+        migrateDatabase:
+          enabled: true
+      
+      database:
+        host: rhtpa-db.{{ .Values.rhtpa.namespace }}.svc.cluster.local
+        name: {{ .Values.rhtpa.database.name }}
+        username: {{ .Values.rhtpa.database.username }}
+        password: "${DB_PASSWORD}"
+      
+      storage:
+        type: s3
+        accessKey: "${S3_ACCESS_KEY}"
+        secretKey: "${S3_SECRET_KEY}"
+        bucket: "${S3_BUCKET}"
+        region: {{ .Values.rhtpa.objectStorage.region | default "us-east-1" | quote }}
+      
+      {{- if .Values.rhtpa.tls.ingressCA.enabled }}
+      extraVolumes:
+        - name: ingress-ca
+          configMap:
+            name: rhtpa-ingress-ca
+      
+      extraVolumeMounts:
+        - name: ingress-ca
+          mountPath: /etc/rhtpa/tls
+          readOnly: true
+      {{- end }}
+    EOFTEMPLATE
+    
+    echo "TrustedProfileAnalyzer CR created successfully with real credentials!"
+{{- end }}
+

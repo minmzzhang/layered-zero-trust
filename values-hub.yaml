@@ -27,12 +27,12 @@ clusterGroup:
         operatorGroup: true
         targetNamespace: cert-manager-operator
     # UNCOMMENT if you want to deploy Quay
-    # - openshift-storage:
-    #     operatorGroup: true
-    #     targetNamespace: openshift-storage
-    #     annotations:
-    #       openshift.io/cluster-monitoring: "true"
-    #       argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
+    - openshift-storage:
+        operatorGroup: true
+        targetNamespace: openshift-storage
+        annotations:
+          openshift.io/cluster-monitoring: "true"
+          argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
     # - quay-enterprise:
     #     annotations:
     #       argocd.argoproj.io/sync-wave: "1"  # Create before NooBaa and all Quay components
@@ -44,6 +44,17 @@ clusterGroup:
     #       argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
     #     labels:
     #       openshift.io/cluster-monitoring: "true"
+    # UNCOMMENT if you want to deploy RHTPA
+    - rhtpa-operator:
+        operatorGroup: true
+        targetNamespace: rhtpa-system
+        annotations:
+          argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
+    - rhtpa-system:
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
+        labels:
+          openshift.io/cluster-monitoring: "true"
     - zero-trust-workload-identity-manager:
         operatorGroup: true
         targetNamespace: zero-trust-workload-identity-manager
@@ -82,12 +93,12 @@ clusterGroup:
         nodeSelector:
           node-role.kubernetes.io/worker: ""
     # UNCOMMENT for Quay operator subscriptions
-    # odf:
-    #   name: odf-operator
-    #   namespace: openshift-storage
-    #   channel: stable-4.19
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-4"  # Layer 1: Install after OperatorGroup (-5)
+    odf:
+      name: odf-operator
+      namespace: openshift-storage
+      channel: stable-4.19
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Layer 1: Install after OperatorGroup (-5)
     # quay-operator:
     #   name: quay-operator
     #   namespace: openshift-operators
@@ -100,6 +111,12 @@ clusterGroup:
     #   namespace: openshift-operators
     #   channel: stable
     #   catalogSource: redhat-operators
+    # UNCOMMENT for RHTPA operator subscriptions
+    rhtpa-operator:
+      name: rhtpa-operator
+      namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
+      channel: stable
+      catalogSource: redhat-operators
   projects:
     - hub
   # Explicitly mention the cluster-state based overrides we plan to use for this pattern.
@@ -172,14 +189,20 @@ clusterGroup:
           #   subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-artifact-signer/sa/*
           #   policies:
           #     - global-secret
+          # UNCOMMENT for RHTPA vault role
+          - name: rhtpa
+            audience: rhtpa
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtpa-system/sa/*
+            policies:
+              - global-secret
     # UNCOMMENT for Quay applications
-    # noobaa-mcg:
-    #   name: noobaa-mcg
-    #   namespace: openshift-storage
-    #   project: hub
-    #   path: charts/noobaa-mcg
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "5"  # Layer 1: Deploy after core services
+    noobaa-mcg:
+      name: noobaa-mcg
+      namespace: openshift-storage
+      project: hub
+      path: charts/noobaa-mcg
+      annotations:
+        argocd.argoproj.io/sync-wave: "5"  # Layer 1: Deploy after core services
     # quay-registry:
     #   name: quay-registry
     #   namespace: quay-enterprise
@@ -201,7 +224,22 @@ clusterGroup:
     #     - name: rhtas.zeroTrust.vault.url
     #       value: https://vault.vault.svc.cluster.local:8200
     #     - name: rhtas.zeroTrust.keycloak.url
-    #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}              
+    #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}
+    # UNCOMMENT for RHTPA applications (requires NooBaa MCG for storage)
+    rhtpa:
+      name: rhtpa
+      namespace: rhtpa-system
+      project: hub
+      path: charts/rhtpa-operator
+      annotations:
+        argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa and RHTAS
+      overrides:
+        - name: rhtpa.zeroTrust.spire.trustDomain
+          value: "apps.{{ $.Values.global.clusterDomain }}"
+        - name: rhtpa.zeroTrust.vault.url
+          value: https://vault.vault.svc.cluster.local:8200
+        - name: rhtpa.zeroTrust.keycloak.url
+          value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets

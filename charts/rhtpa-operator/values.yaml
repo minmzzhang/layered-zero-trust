@@ -21,6 +21,7 @@ rhtpa:
       enabled: true
       url: "https://vault.vault.svc.cluster.local:8200" 
       role: "rhtpa"
+      policy: "global-secret"
       secretPath: "secret/data/global/rhtpa"
     keycloak:
       enabled: true

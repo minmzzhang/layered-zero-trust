@@ -197,10 +197,12 @@ clusterGroup:
           #   subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-artifact-signer/sa/*
           #   policies:
           #     - global-secret
-          # RHTPA vault role (required for RHTPA SPIFFE JWT authentication)
+          # RHTPA vault role
+          # Note: subject with wildcards (sa/*) does not work in Vault JWT auth
+          # Remove bound_subject in actual Vault configuration and rely on audience matching
           - name: rhtpa
             audience: rhtpa
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtpa-system/sa/*
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtpa-system/sa/rhtpa
             policies:
               - global-secret
     # Shared Object Storage Backend

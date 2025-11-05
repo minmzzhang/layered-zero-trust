@@ -1,10 +1,10 @@
 {{- if .Values.rhtpa.enabled }}
 ---
-# ServiceAccount for the CR creator job
+# ServiceAccount for RHTPA
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: rhtpa-cr-creator
+  name: rhtpa
   namespace: {{ .Values.rhtpa.namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "18"
@@ -44,7 +44,7 @@ roleRef:
   name: rhtpa-cr-creator
 subjects:
 - kind: ServiceAccount
-  name: rhtpa-cr-creator
+  name: rhtpa
   namespace: {{ .Values.rhtpa.namespace }}
 ---
 # Job to create TrustedProfileAnalyzer CR with real credentials
@@ -63,21 +63,63 @@ spec:
     metadata:
       name: rhtpa-cr-creator
     spec:
-      serviceAccountName: rhtpa-cr-creator
+      serviceAccountName: rhtpa
       restartPolicy: OnFailure
       volumes:
       - name: script
         configMap:
           name: rhtpa-cr-creator-script
           defaultMode: 0755
+      - name: spiffe-workload-api
+        csi:
+          driver: "csi.spiffe.io"
+          readOnly: true
+      - name: spiffe-vault-client
+        configMap:
+          name: spiffe-vault-client
+          defaultMode: 0755
+      - name: spiffe-token
+        emptyDir: {}
+      - name: spiffe-helper-config
+        configMap:
+          name: spiffe-helper-config
       containers:
+      # SPIFFE helper sidecar to generate JWT token
+      - name: spiffe-helper
+        image: ghcr.io/spiffe/spiffe-helper:nightly
+        args:
+        - -config
+        - /etc/spiffe-helper/config.hcl
+        volumeMounts:
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+        - name: spiffe-token
+          mountPath: /run/secrets/spiffe
+        - name: spiffe-helper-config
+          mountPath: /etc/spiffe-helper
+      # Main container
       - name: create-cr
         image: registry.redhat.io/openshift4/ose-cli:latest
         command:
         - /bin/bash
         - /scripts/create-cr.sh
+        env:
+        - name: VAULT_ADDR
+          value: {{ .Values.rhtpa.zeroTrust.vault.url | quote }}
+        - name: SPIFFE_ENDPOINT_SOCKET
+          value: "unix:///spiffe-workload-api/spire-agent.sock"
         volumeMounts:
         - name: script
           mountPath: /scripts
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+        - name: spiffe-vault-client
+          mountPath: /usr/local/bin/spiffe-vault-client.py
+          subPath: spiffe-vault-client.py
+        - name: spiffe-token
+          mountPath: /run/secrets/spiffe
+          readOnly: true
 {{- end }}
 

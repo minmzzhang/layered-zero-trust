@@ -251,21 +251,22 @@ clusterGroup:
     # For additional overrides that apply to the jobs, please refer to
     # https://hybrid-cloud-patterns.io/imperative-actions/#additional-job-customizations
     jobs: []
-  managedClusterGroups: {}
+  managedClusterGroups:
+  # managedClusterGroups: {}
   # This configuration can be used for Pipeline/DevSecOps (UC-01 / UC-02)
-  #  devel:
-  #    name: devel
-  #    helmOverrides:
-  #      - name: clusterGroup.isHubCluster
-  #        value: false
-  #    clusterSelector:
-  #      matchLabels:
-  #        clusterGroup: devel
-  #      matchExpressions:
-  #        - key: vendor
-  #          operator: In
-  #          values:
-  #            - OpenShift
+    devel:
+      name: devel
+      helmOverrides:
+        - name: clusterGroup.isHubCluster
+          value: false
+      clusterSelector:
+        matchLabels:
+          clusterGroup: devel
+        matchExpressions:
+          - key: vendor
+            operator: In
+            values:
+              - OpenShift
   #  production:
   #    name: production
   #    helmOverrides:
@@ -342,17 +343,18 @@ clusterGroup:
 
 # List of previously provisioned clusters to import and manage from the Hub cluster
 acmManagedClusters:
-  clusters: []
+  clusters:
+  # clusters: []
   # This configuration can be used for Pipeline/DevSecOps (UC-01 / UC-02)
-  #  - name: ztvp-spoke-1
-  #    clusterGroup: devel
-  #    labels:
-  #      cloud: auto-detect
-  #      vendor: auto-detect
-  #    kubeconfigVaultPath: secret/data/hub/kubeconfig-spoke-1
-  #  - name: ztvp-spoke-2
-  #    clusterGroup: production
-  #    labels:
-  #      cloud: auto-detect
-  #      vendor: auto-detect
-  #    kubeconfigVaultPath: secret/data/hub/kubeconfig-spoke-2
+   - name: ztvp-spoke-1
+     clusterGroup: devel
+     labels:
+       cloud: auto-detect
+       vendor: auto-detect
+     kubeconfigVaultPath: secret/data/hub/kubeconfig-spoke-1
+  # - name: ztvp-spoke-2
+  #   clusterGroup: production
+  #   labels:
+  #     cloud: auto-detect
+  #     vendor: auto-detect
+  #   kubeconfigVaultPath: secret/data/hub/kubeconfig-spoke-2

@@ -30,13 +30,12 @@ quay:
     admin:
       name: quayadmin
       email: quayadmin@example.com
-    user:
-      name: developer1
-      email: developer1@myorg.com
 
 job:
   image: registry.redhat.io/openshift4/ose-cli:latest
 
+# Quay organization configuration (not automatically created)
+# Create organizations manually via Quay UI or API if needed
 quay_config:
   org:
     name: devel
@@ -49,3 +48,10 @@ objectStorage:
     name: quay-bucket
     bucketName: quay-datastore
     storageClass: openshift-storage.noobaa.io
+
+# Global Configuration (inherited from parent chart)
+global:
+  secretStore:
+    name: vault-backend
+    kind: ClusterSecretStore
+    backend: secret/data

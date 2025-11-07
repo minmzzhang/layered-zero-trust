@@ -1,0 +1,264 @@
+{{- if .Values.rhtas.zeroTrust.spire.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.rhtas.app.name }}
+  namespace: {{ .Values.rhtas.namespace }}
+  labels:
+    {{- include "rhtas-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: signer
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"  # Deploy after Securesign CR (wave 15) and RHTAS services are ready
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.rhtas.app.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.rhtas.app.name }}
+      annotations:
+        checksum/spiffe-helper-config: {{ include (print $.Template.BasePath "/spiffe-helper-config.yaml") . | sha256sum }}
+        checksum/artifact-signer-config: {{ include (print $.Template.BasePath "/artifact-signer-config.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Values.rhtas.app.name }}
+      
+      # Init containers: Setup CA trust, download cosign, and fetch initial JWT-SVID
+      initContainers:
+      - name: setup-ingress-ca
+        image: {{ .Values.rhtas.app.images.python.name }}:{{ .Values.rhtas.app.images.python.tag }}
+        imagePullPolicy: {{ .Values.rhtas.app.images.python.pullPolicy }}
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Extracting OpenShift ingress CA certificate..."
+            
+            # Install openssl if not available
+            if ! command -v openssl &> /dev/null; then
+              echo "Installing openssl..."
+              microdnf install -y openssl 2>&1 || echo "openssl may already be installed"
+            fi
+            
+            # Get the ingress CA by connecting to the Fulcio route
+            FULCIO_HOST="fulcio-server-{{ .Values.rhtas.namespace }}.{{ .Values.global.localClusterDomain }}"
+            
+            echo "Connecting to ${FULCIO_HOST}:443..."
+            # Extract the certificate chain using openssl
+            echo | openssl s_client -connect ${FULCIO_HOST}:443 -showcerts 2>&1 | \
+              awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' > /ca-trust/ingress-ca.crt
+            
+            if [ -s /ca-trust/ingress-ca.crt ]; then
+              echo "Successfully extracted ingress CA certificate"
+              echo "Certificate details:"
+              openssl x509 -in /ca-trust/ingress-ca.crt -noout -subject -issuer 2>&1 || true
+              echo "Certificate saved to /ca-trust/ingress-ca.crt"
+            else
+              echo "ERROR: Failed to extract ingress CA certificate"
+              echo "File size: $(ls -lh /ca-trust/ingress-ca.crt 2>&1 || echo 'file not created')"
+              exit 1
+            fi
+        volumeMounts:
+          - name: ca-trust
+            mountPath: /ca-trust
+      - name: download-cosign
+        image: {{ .Values.rhtas.app.images.python.name }}:{{ .Values.rhtas.app.images.python.tag }}
+        imagePullPolicy: {{ .Values.rhtas.app.images.python.pullPolicy }}
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Downloading cosign from cli-server..."
+            
+            # Download cosign for linux/amd64 (gzipped)
+            CLI_SERVER_URL="https://cli-server-{{ .Values.rhtas.namespace }}.{{ .Values.global.localClusterDomain }}"
+            COSIGN_URL="${CLI_SERVER_URL}/clients/linux/cosign-amd64.gz"
+            
+            echo "Downloading from: $COSIGN_URL"
+            curl -skL "$COSIGN_URL" -o /tmp/cosign-amd64.gz
+            
+            # Extract the gzipped binary
+            echo "Extracting cosign binary..."
+            gunzip /tmp/cosign-amd64.gz
+            
+            # Move to shared volume and make executable
+            mv /tmp/cosign-amd64 /shared/cosign
+            chmod +x /shared/cosign
+            
+            echo "cosign downloaded and extracted successfully"
+            /shared/cosign version
+        volumeMounts:
+          - name: shared-bin
+            mountPath: /shared
+      - name: init-spiffe-helper
+        image: {{ .Values.rhtas.app.images.spiffeHelper.name }}:{{ .Values.rhtas.app.images.spiffeHelper.tag }}
+        imagePullPolicy: {{ .Values.rhtas.app.images.spiffeHelper.pullPolicy }}
+        args:
+          - '-config'
+          - /etc/spiffe-helper/helper.conf
+          - '-daemon-mode=false'
+        volumeMounts:
+          - name: spiffe-helper-config
+            readOnly: true
+            mountPath: /etc/spiffe-helper
+          - name: spiffe-workload-api
+            readOnly: true
+            mountPath: /spiffe-workload-api
+          - name: svids
+            mountPath: /svids
+      - name: init-artifact-signer
+        image: {{ .Values.rhtas.app.images.python.name }}:{{ .Values.rhtas.app.images.python.tag }}
+        imagePullPolicy: {{ .Values.rhtas.app.images.python.pullPolicy }}
+        command:
+          - python3
+          - /opt/artifact-signer/artifact-signer.py
+          - '--init'
+        env:
+          - name: FULCIO_URL
+            value: "https://fulcio-server-{{ .Values.rhtas.namespace }}.{{ $.Values.global.localClusterDomain }}"
+          - name: REKOR_URL
+            value: "https://rekor-server-{{ .Values.rhtas.namespace }}.{{ $.Values.global.localClusterDomain }}"
+          - name: TUF_URL
+            value: "https://tuf-{{ .Values.rhtas.namespace }}.{{ $.Values.global.localClusterDomain }}"
+          - name: JWT_TOKEN_FILE
+            value: /svids/jwt.token
+          - name: COSIGN_BINARY
+            value: /usr/local/bin/cosign
+          - name: NAMESPACE
+            value: "{{ .Values.rhtas.namespace }}"
+          - name: SSL_CERT_FILE
+            value: /ca-trust/ingress-ca.crt
+          - name: REQUESTS_CA_BUNDLE
+            value: /ca-trust/ingress-ca.crt
+        volumeMounts:
+          - name: svids
+            mountPath: /svids
+            readOnly: true
+          - name: shared-bin
+            mountPath: /usr/local/bin
+            readOnly: true
+          - name: artifact-signer
+            mountPath: /opt/artifact-signer
+            readOnly: true
+          - name: ca-trust
+            mountPath: /ca-trust
+            readOnly: true
+      
+      containers:
+      # Sidecar: spiffe-helper - continuously refresh JWT-SVID
+      - name: spiffe-helper
+        image: {{ .Values.rhtas.app.images.spiffeHelper.name }}:{{ .Values.rhtas.app.images.spiffeHelper.tag }}
+        imagePullPolicy: {{ .Values.rhtas.app.images.spiffeHelper.pullPolicy }}
+        args:
+          - '-config'
+          - /etc/spiffe-helper/helper.conf
+        volumeMounts:
+          - name: spiffe-helper-config
+            readOnly: true
+            mountPath: /etc/spiffe-helper
+          - name: spiffe-workload-api
+            readOnly: true
+            mountPath: /spiffe-workload-api
+          - name: svids
+            mountPath: /svids
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      
+      # Main container: Artifact signing application
+      - name: artifact-signer
+        image: {{ .Values.rhtas.app.images.python.name }}:{{ .Values.rhtas.app.images.python.tag }}
+        imagePullPolicy: {{ .Values.rhtas.app.images.python.pullPolicy }}
+        command:
+          - python3
+          - /opt/artifact-signer/artifact-signer.py
+        env:
+          - name: FULCIO_URL
+            value: "https://fulcio-server-{{ .Values.rhtas.namespace }}.{{ $.Values.global.localClusterDomain }}"
+          - name: REKOR_URL
+            value: "https://rekor-server-{{ .Values.rhtas.namespace }}.{{ $.Values.global.localClusterDomain }}"
+          - name: TUF_URL
+            value: "https://tuf-{{ .Values.rhtas.namespace }}.{{ $.Values.global.localClusterDomain }}"
+          - name: JWT_TOKEN_FILE
+            value: /svids/jwt.token
+          - name: COSIGN_BINARY
+            value: /usr/local/bin/cosign
+          - name: NAMESPACE
+            value: "{{ .Values.rhtas.namespace }}"
+          - name: SSL_CERT_FILE
+            value: /ca-trust/ingress-ca.crt
+          - name: REQUESTS_CA_BUNDLE
+            value: /ca-trust/ingress-ca.crt
+          {{- if or .Values.rhtas.app.registryCredentialsSecret .Values.rhtas.app.quay.enabled .Values.rhtas.app.externalRegistry.enabled }}
+          - name: DOCKER_CONFIG
+            value: /tmp/.docker
+          {{- end }}
+        volumeMounts:
+          - name: svids
+            mountPath: /svids
+            readOnly: true
+          - name: shared-bin
+            mountPath: /usr/local/bin
+            readOnly: true
+          - name: artifact-signer
+            mountPath: /opt/artifact-signer
+            readOnly: true
+          - name: ca-trust
+            mountPath: /ca-trust
+            readOnly: true
+          {{- if or .Values.rhtas.app.registryCredentialsSecret .Values.rhtas.app.quay.enabled .Values.rhtas.app.externalRegistry.enabled }}
+          - name: registry-credentials
+            mountPath: /tmp/.docker
+            readOnly: true
+          {{- end }}
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      
+      volumes:
+        - name: spiffe-helper-config
+          configMap:
+            name: {{ .Values.rhtas.namespace }}-spiffe-helper
+            defaultMode: 420
+        - name: artifact-signer
+          configMap:
+            name: {{ .Values.rhtas.namespace }}-artifact-signer
+            defaultMode: 0755
+        - name: spiffe-workload-api
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: svids
+          emptyDir: {}
+        - name: shared-bin
+          emptyDir: {}
+        - name: ca-trust
+          emptyDir: {}
+        {{- if or .Values.rhtas.app.registryCredentialsSecret .Values.rhtas.app.quay.enabled .Values.rhtas.app.externalRegistry.enabled }}
+        - name: registry-credentials
+          secret:
+            {{- if .Values.rhtas.app.quay.enabled }}
+            secretName: {{ .Values.rhtas.app.quay.credentialsSecretName }}
+            {{- else if .Values.rhtas.app.externalRegistry.enabled }}
+            secretName: {{ .Values.rhtas.app.externalRegistry.credentialsSecretName }}
+            {{- else }}
+            secretName: {{ .Values.rhtas.app.registryCredentialsSecret }}
+            {{- end }}
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+        {{- end }}
+{{- end }}
+
+

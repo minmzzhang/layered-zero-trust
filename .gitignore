@@ -13,3 +13,7 @@ super-linter-output
 
 # GitHub Actions leftovers
 github_conf
+
+# Editor and IDE specific files
+.cursorrules
+.vscode/

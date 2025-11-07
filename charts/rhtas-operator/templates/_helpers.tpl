@@ -60,3 +60,19 @@ and appends the realm name.
 {{- $keycloakUrl := tpl .Values.rhtas.zeroTrust.keycloak.url . -}}
 {{- printf "%s/realms/%s" $keycloakUrl .Values.rhtas.zeroTrust.keycloak.realm -}}
 {{- end }}
+
+{{/*
+Generate the SPIFFE Trust Domain
+This evaluates any template variables (like {{ $.Values.global.clusterDomain }})
+*/}}
+{{- define "rhtas-operator.spiffeTrustDomain" -}}
+{{- tpl .Values.rhtas.zeroTrust.spire.trustDomain . -}}
+{{- end }}
+
+{{/*
+Generate the SPIRE OIDC Discovery URL
+This evaluates any template variables (like {{ $.Values.global.clusterDomain }})
+*/}}
+{{- define "rhtas-operator.spireOIDCDiscoveryUrl" -}}
+{{- tpl .Values.rhtas.zeroTrust.spire.oidcDiscoveryUrl . -}}
+{{- end }}

@@ -2,23 +2,91 @@
 # Uses the RHTAS Operator to deploy and manage RHTAS components
 # Integrates with Zero Trust architecture: SPIRE, Vault, Keycloak
 
+global:
+  secretStore:
+    name: vault-backend
+    kind: ClusterSecretStore
+    backend: secret/data
+  imageRegistry: registry.redhat.io
+
 rhtas:
   namespace: trusted-artifact-signer
+  
+  # RHTAS signing workload for artifact signing with SPIFFE identity
+  # Automatically enabled when zeroTrust.spire.enabled is true
+  app:
+    name: rhtas-signer
+    # Registry credentials configuration
+    # Option 1: Use external registry (e.g., Quay.io)
+    #   Set registryCredentialsSecret to an existing secret name
+    # Option 2: Use integrated Quay (enabled via quay.enabled)
+    #   Credentials will be automatically created from Vault
+    registryCredentialsSecret: ""  # Name of kubernetes.io/dockerconfigjson secret
+    
+    # Integrated Quay Configuration
+    # When enabled, automatically creates registry credentials from Vault
+    quay:
+      enabled: false  # Set to true to use integrated Quay registry
+      credentialsSecretName: "rhtas-quay-credentials"  # Auto-created secret name
+      registryHost: "quay-registry-quay-quay-enterprise.apps.example.com"  # Override in values-hub.yaml
+      username: "quayadmin"  # Quay username from Vault
+      email: "quayadmin@example.com"
+      vaultPath: "global/quay-users"  # Vault path for Quay credentials
+      passwordKey: "quay-admin-password"  # Key in Vault secret
+    
+    # External Registry Configuration (e.g., Quay.io, Docker Hub)
+    # When enabled, creates registry credentials from Vault using External Secrets
+    externalRegistry:
+      enabled: false  # Set to true to use external registry with ESO
+      credentialsSecretName: "rhtas-external-registry-credentials"  # Auto-created secret name
+      server: "quay.io"  # Registry server hostname
+      email: "user@example.com"  # User email
+      vaultPath: "global/external-registry"  # Vault path for registry credentials
+      # Vault secret should contain: username, password
+    
+    images:
+      spiffeHelper:
+        name: ghcr.io/spiffe/spiffe-helper
+        tag: "0.10.1"
+        pullPolicy: IfNotPresent
+      python:
+        name: registry.redhat.io/ubi9/python-311
+        tag: latest
+        pullPolicy: IfNotPresent
+      ubi:
+        name: registry.redhat.io/ubi9/ubi-minimal
+        tag: latest
+        pullPolicy: IfNotPresent
   
   # Zero Trust Integration
   zeroTrust:
     spire:
-      enabled: true
+      enabled: true  # Set to false to use Keycloak instead
       trustDomain: "apps.example.com"
+      # IMPORTANT: This URL must match the 'iss' claim in JWT-SVIDs issued by SPIRE
+      # SPIRE uses the external route URL (apps.example.com), not the internal service URL
+      oidcDiscoveryUrl: "https://spire-spiffe-oidc-discovery-provider.apps.example.com"
     vault:
       enabled: true
       url: "https://vault.vault.svc.cluster.local:8200" 
       role: "rhtas"
       secretPath: "secret/data/global/rhtas"
     keycloak:
-      enabled: true
       url: "https://keycloak.apps.example.com"  # MUST be public route URL (overridden in values-hub.yaml)
       realm: "ztvp"
+  
+  # Fulcio-specific configuration
+  fulcio:
+    # OIDC Issuer configuration controlled by zeroTrust.spire.enabled flag
+    # - If true (default): Use SPIFFE issuer for workload identity
+    # - If false: Use Keycloak issuer for user/email authentication
+    oidcIssuers:
+      spiffe:
+        clientID: "trusted-artifact-signer"
+        type: "spiffe"
+      keycloak:
+        clientID: "trusted-artifact-signer"
+        type: "email"
 
   # Securesign Configuration - Main RHTAS Operator Resource
   securesign:
@@ -64,7 +132,3 @@ rhtas:
       organizationName: "Red Hat Zero Trust Validated Patterns"
       organizationEmail: "ztvp-arch-group@redhat.com"
       commonName: "tsa"
-
-# Global Configuration
-global:
-  imageRegistry: registry.redhat.io

@@ -1,0 +1,139 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: quay-user-creation
+  namespace: {{ .Values.quay.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"  # Layer 1: Create users after Quay is deployed
+spec:
+  template:
+    spec:
+      serviceAccountName: quay-s3-setup
+      containers:
+      - name: create-users
+        image: {{ .Values.job.image }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "=========================================="
+          echo "Quay User Creation Job"
+          echo "=========================================="
+          
+          # Wait for Quay to be ready
+          echo "Waiting for Quay to be ready..."
+          QUAY_ROUTE=$(oc get route -n {{ .Values.quay.namespace }} -l quay-operator/quayregistry=quay-registry -o jsonpath='{.items[0].spec.host}')
+          
+          if [ -z "$QUAY_ROUTE" ]; then
+            echo "ERROR: Quay route not found"
+            exit 1
+          fi
+          
+          QUAY_URL="https://${QUAY_ROUTE}"
+          echo "Quay URL: $QUAY_URL"
+          
+          # Wait for Quay API to be responsive (up to 10 minutes)
+          echo "Checking Quay API availability..."
+          RETRIES=60
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $RETRIES ]; do
+            if curl -k -s -o /dev/null -w "%{http_code}" "${QUAY_URL}/health/instance" | grep -q "200"; then
+              echo "Quay is ready!"
+              break
+            fi
+            echo "Waiting for Quay to be ready... (attempt $((RETRY_COUNT + 1))/$RETRIES)"
+            sleep 10
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+          done
+          
+          if [ $RETRY_COUNT -eq $RETRIES ]; then
+            echo "ERROR: Quay did not become ready within timeout"
+            exit 1
+          fi
+          
+          # Get passwords from Vault via Kubernetes secrets
+          # Vault External Secrets Operator should have already synced these to a secret
+          echo "Retrieving user passwords from Vault..."
+          
+          # Check if quay-users secret exists (should be created by External Secrets)
+          if ! oc get secret quay-users -n {{ .Values.quay.namespace }} &>/dev/null; then
+            echo "ERROR: quay-users secret not found in {{ .Values.quay.namespace }} namespace"
+            echo "This secret should be created by External Secrets Operator from Vault"
+            echo "Expected path: secret/data/global/quay-users"
+            exit 1
+          fi
+          
+          ADMIN_PASSWORD=$(oc get secret quay-users -n {{ .Values.quay.namespace }} -o jsonpath='{.data.quay-admin-password}' | base64 -d)
+          
+          if [ -z "$ADMIN_PASSWORD" ]; then
+            echo "ERROR: Failed to retrieve admin password from quay-users secret"
+            exit 1
+          fi
+          
+          echo "Successfully retrieved passwords from Vault"
+          
+          # Create initial superuser (quayadmin)
+          echo "=========================================="
+          echo "Creating superuser: {{ .Values.quay.setup.admin.name }}"
+          echo "=========================================="
+          
+          # Check if user already exists
+          USER_EXISTS=$(curl -k -s -o /dev/null -w "%{http_code}" \
+            -X GET "${QUAY_URL}/api/v1/users/{{ .Values.quay.setup.admin.name }}")
+          
+          if [ "$USER_EXISTS" == "200" ]; then
+            echo "Superuser {{ .Values.quay.setup.admin.name }} already exists, skipping creation"
+          else
+            # Create initial superuser via Quay API
+            # When FEATURE_USER_INITIALIZE is true, the first user can self-register
+            RESPONSE=$(curl -k -s -w "\n%{http_code}" \
+              -X POST "${QUAY_URL}/api/v1/user/initialize" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"username\": \"{{ .Values.quay.setup.admin.name }}\",
+                \"password\": \"${ADMIN_PASSWORD}\",
+                \"email\": \"{{ .Values.quay.setup.admin.email }}\",
+                \"access_token\": true
+              }")
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | head -n-1)
+            
+            if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "201" ]; then
+              echo "Successfully created superuser: {{ .Values.quay.setup.admin.name }}"
+              # Extract access token for creating other users
+              ADMIN_TOKEN=$(echo "$BODY" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+              if [ -z "$ADMIN_TOKEN" ]; then
+                echo "WARNING: Failed to extract admin access token, will use password auth"
+              fi
+            else
+              echo "ERROR: Failed to create superuser (HTTP $HTTP_CODE)"
+              echo "Response: $BODY"
+              exit 1
+            fi
+          fi
+          
+          echo "=========================================="
+          echo "Quay User Creation Completed Successfully!"
+          echo "=========================================="
+          echo ""
+          echo "Summary:"
+          echo "  Quay URL: $QUAY_URL"
+          echo "  Superuser: {{ .Values.quay.setup.admin.name }}"
+          echo ""
+          echo "Passwords are stored in Vault at: secret/data/global/quay-users"
+          echo ""
+      restartPolicy: OnFailure
+  backoffLimit: 10
+

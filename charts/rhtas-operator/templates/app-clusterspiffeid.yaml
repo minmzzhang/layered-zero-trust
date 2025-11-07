@@ -1,0 +1,18 @@
+{{- if .Values.rhtas.zeroTrust.spire.enabled }}
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: {{ .Values.rhtas.namespace }}-signer
+  labels:
+    {{- include "rhtas-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: signer
+spec:
+  spiffeIDTemplate: "spiffe://{{ include "rhtas-operator.spiffeTrustDomain" . }}/ns/{{ "{{" }} .PodMeta.Namespace {{ "}}" }}/sa/{{ "{{" }} .PodSpec.ServiceAccountName {{ "}}" }}"
+  podSelector:
+    matchLabels:
+      app: {{ .Values.rhtas.app.name }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ .Values.rhtas.namespace }}"
+    - "k8s:sa:{{ .Values.rhtas.app.name }}"
+{{- end }}
+

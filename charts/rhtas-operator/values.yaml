@@ -2,23 +2,41 @@
 # Uses the RHTAS Operator to deploy and manage RHTAS components
 # Integrates with Zero Trust architecture: SPIRE, Vault, Keycloak
 
+global:
+  secretStore:
+    name: vault-backend
+    kind: ClusterSecretStore
+    backend: secret/data
+  imageRegistry: registry.redhat.io
+
 rhtas:
   namespace: trusted-artifact-signer
   
   # Zero Trust Integration
+  # Note: Both SPIFFE and Keycloak issuers can be enabled simultaneously
   zeroTrust:
     spire:
-      enabled: true
+      enabled: true  # Enable SPIFFE issuer for workload identity
       trustDomain: "apps.example.com"
-    vault:
-      enabled: true
-      url: "https://vault.vault.svc.cluster.local:8200" 
-      role: "rhtas"
-      secretPath: "secret/data/global/rhtas"
+      # IMPORTANT: This URL must match the 'iss' claim in JWT-SVIDs issued by SPIRE
+      # SPIRE uses the external route URL (apps.example.com), not the internal service URL
+      oidcDiscoveryUrl: "https://spire-spiffe-oidc-discovery-provider.apps.example.com"
     keycloak:
-      enabled: true
+      enabled: true  # Enable Keycloak issuer for user/email authentication
       url: "https://keycloak.apps.example.com"  # MUST be public route URL (overridden in values-hub.yaml)
       realm: "ztvp"
+  
+  # Fulcio-specific configuration
+  fulcio:
+    # OIDC Issuer configuration - both can be enabled simultaneously
+    # Each issuer type can be independently enabled/disabled via zeroTrust flags
+    oidcIssuers:
+      spiffe:
+        clientID: "sigstore"
+        type: "spiffe"
+      keycloak:
+        clientID: "trusted-artifact-signer"
+        type: "email"
 
   # Securesign Configuration - Main RHTAS Operator Resource
   securesign:
@@ -64,7 +82,3 @@ rhtas:
       organizationName: "Red Hat Zero Trust Validated Patterns"
       organizationEmail: "ztvp-arch-group@redhat.com"
       commonName: "tsa"
-
-# Global Configuration
-global:
-  imageRegistry: registry.redhat.io

@@ -21,10 +21,21 @@ spec:
       organizationEmail: {{ .Values.rhtas.certificate.organizationEmail }}
     config:
       OIDCIssuers:
-        - ClientID: "trusted-artifact-signer"
+        {{- if .Values.rhtas.zeroTrust.spire.enabled }}
+        # SPIFFE issuer - for workload identity
+        - ClientID: {{ .Values.rhtas.fulcio.oidcIssuers.spiffe.clientID | quote }}
+          Issuer: "{{ include "rhtas-operator.spireOIDCDiscoveryUrl" . }}"
+          IssuerURL: "{{ include "rhtas-operator.spireOIDCDiscoveryUrl" . }}"
+          Type: {{ .Values.rhtas.fulcio.oidcIssuers.spiffe.type | quote }}
+          SPIFFETrustDomain: "{{ include "rhtas-operator.spiffeTrustDomain" . }}"
+        {{- end }}
+        {{- if .Values.rhtas.zeroTrust.keycloak.enabled }}
+        # Keycloak issuer - for user/email authentication
+        - ClientID: {{ .Values.rhtas.fulcio.oidcIssuers.keycloak.clientID | quote }}
           Issuer: "{{ include "rhtas-operator.keycloakOIDCIssuer" . }}"
           IssuerURL: "{{ include "rhtas-operator.keycloakOIDCIssuer" . }}"
-          Type: "email"
+          Type: {{ .Values.rhtas.fulcio.oidcIssuers.keycloak.type | quote }}
+        {{- end }}
     externalAccess:
       enabled: {{ .Values.rhtas.externalAccess.enabled }}
     {{- if .Values.rhtas.monitoring.enabled }}

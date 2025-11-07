@@ -26,7 +26,8 @@ clusterGroup:
     - cert-manager-operator:
         operatorGroup: true
         targetNamespace: cert-manager-operator
-    # UNCOMMENT if you want to deploy Quay
+    # Layer 1: Quay Registry (for container image storage and signing)
+    # COMMENTED OUT: Uncomment to enable integrated Quay registry
     # - openshift-storage:
     #     operatorGroup: true
     #     targetNamespace: openshift-storage
@@ -38,7 +39,8 @@ clusterGroup:
     #       argocd.argoproj.io/sync-wave: "1"  # Create before NooBaa and all Quay components
     #     labels:
     #       openshift.io/cluster-monitoring: "true"
-    # UNCOMMENT if you want to deploy RHTAS
+    # RHTAS namespace (required when RHTAS application is enabled)
+    # COMMENTED OUT: Uncomment to enable RHTAS with SPIFFE signing
     # - trusted-artifact-signer:
     #     annotations:
     #       argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
@@ -81,24 +83,29 @@ clusterGroup:
       config:
         nodeSelector:
           node-role.kubernetes.io/worker: ""
-    # UNCOMMENT for Quay operator subscriptions
+    # Storage and Registry operator subscriptions
+    # COMMENTED OUT: Uncomment to enable integrated Quay registry
+    # ODF provides object storage backend (NooBaa) for Quay and RHTPA
     # odf:
     #   name: odf-operator
     #   namespace: openshift-storage
     #   channel: stable-4.19
     #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-4"  # Layer 1: Install after OperatorGroup (-5)
+    #     argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5)
     # quay-operator:
     #   name: quay-operator
     #   namespace: openshift-operators
     #   channel: stable-3.15
     #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-3"  # Layer 1: Install after ODF operator
-    # UNCOMMENT for RHTAS operator subscriptions
+    #     argocd.argoproj.io/sync-wave: "-3"  # Install after ODF operator
+    # RHTAS operator subscription (required when RHTAS application is enabled)
+    # COMMENTED OUT: Uncomment to enable RHTAS with SPIFFE integration
     # rhtas-operator:
     #   name: rhtas-operator
     #   namespace: openshift-operators
     #   channel: stable
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "-2"  # Install after Quay operator, before applications
     #   catalogSource: redhat-operators
   projects:
     - hub
@@ -166,42 +173,49 @@ clusterGroup:
             subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/qtodo/sa/qtodo
             policies:
               - global-secret
-          # UNCOMMENT for RHTAS vault role
-          # - name: rhtas
-          #   audience: rhtas
-          #   subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-artifact-signer/sa/*
-          #   policies:
-          #     - global-secret
-    # UNCOMMENT for Quay applications
+    # Shared Object Storage Backend
+    # COMMENTED OUT: Uncomment to enable integrated Quay registry
+    # NooBaa MCG provides S3-compatible object storage for multiple applications
+    # Direct consumers: Quay (container image storage)
     # noobaa-mcg:
     #   name: noobaa-mcg
     #   namespace: openshift-storage
     #   project: hub
     #   path: charts/noobaa-mcg
     #   annotations:
-    #     argocd.argoproj.io/sync-wave: "5"  # Layer 1: Deploy after core services
+    #     argocd.argoproj.io/sync-wave: "5"  # Deploy after core services
+    # Quay Container Registry (uses NooBaa for storage)
     # quay-registry:
     #   name: quay-registry
     #   namespace: quay-enterprise
     #   project: hub  
     #   path: charts/quay-registry
     #   annotations:
-    #     argocd.argoproj.io/sync-wave: "10"  # Layer 1: Deploy after NooBaa
-    # UNCOMMENT for RHTAS applications
-    # rhtas:
-    #   name: rhtas
+    #     argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa storage backend
+    # RHTAS with SPIFFE Integration
+    # COMMENTED OUT: Uncomment to enable RHTAS with SPIFFE and Keycloak issuers
+    # Depends on: Vault, SPIRE, Keycloak
+    # trusted-artifact-signer:
+    #   name: trusted-artifact-signer
     #   namespace: trusted-artifact-signer
     #   project: hub
     #   path: charts/rhtas-operator
     #   annotations:
-    #     argocd.argoproj.io/sync-wave: "5"  
+    #     argocd.argoproj.io/sync-wave: "15"  # Deploy after dependencies
     #   overrides:
+    #     # OIDC Issuer Configuration - Both can be enabled simultaneously
+    #     # Enable SPIFFE issuer for workload identity
+    #     - name: rhtas.zeroTrust.spire.enabled
+    #       value: "true"
     #     - name: rhtas.zeroTrust.spire.trustDomain
     #       value: "apps.{{ $.Values.global.clusterDomain }}"
-    #     - name: rhtas.zeroTrust.vault.url
-    #       value: https://vault.vault.svc.cluster.local:8200
+    #     - name: rhtas.zeroTrust.spire.oidcDiscoveryUrl
+    #       value: "https://spire-spiffe-oidc-discovery-provider.apps.{{ $.Values.global.clusterDomain }}"
+    #     # Enable Keycloak issuer for user/email authentication
+    #     - name: rhtas.zeroTrust.keycloak.enabled
+    #       value: "true"
     #     - name: rhtas.zeroTrust.keycloak.url
-    #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}              
+    #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets

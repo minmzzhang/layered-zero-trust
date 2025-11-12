@@ -63,6 +63,40 @@ rhtpa:
   # External access configuration
   externalAccess:
     enabled: true
+  
+  # SYFT SBOM Generator Integration
+  syft:
+    enabled: false  # Set to true to enable automatic SBOM generation
+    image: "anchore/syft:latest"
+    format: "spdx-json"  # Options: spdx-json, cyclonedx-json, syft-json
+    
+    # SPIFFE/JWT Authentication
+    spiffe:
+      enabled: true
+      audience: "syft"  # JWT audience for Vault authentication
+    
+    # Vault integration
+    vault:
+      role: "syft"
+      secretPath: "secret/data/global/rhtpa"  # Use same secrets as RHTPA
+    
+    # Images to scan (can be overridden in values-hub.yaml)
+    images:
+      - "quay.io/qtodo/qtodo:latest"
+    
+    # CronJob configuration (for scheduled scanning)
+    cronjob:
+      enabled: false
+      schedule: "0 2 * * *"  # Daily at 2 AM
+    
+    # Job configuration
+    job:
+      backoffLimit: 3
+      restartPolicy: "OnFailure"
+    
+    # RHTPA API configuration
+    rhtpaApi:
+      url: "http://rhtpa-server:8080"
 
 # Global Configuration
 global:

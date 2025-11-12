@@ -205,6 +205,12 @@ clusterGroup:
             subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtpa-system/sa/rhtpa
             policies:
               - global-secret
+          # SYFT vault role (for SBOM generation)
+          - name: syft
+            audience: syft
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtpa-system/sa/syft
+            policies:
+              - global-secret
     # Shared Object Storage Backend
     # Required for RHTPA (provides S3-compatible storage via NooBaa MCG)
     # NooBaa MCG provides S3-compatible object storage for multiple applications
@@ -263,6 +269,19 @@ clusterGroup:
           value: https://vault.vault.svc.cluster.local:8200
         - name: rhtpa.zeroTrust.keycloak.url
           value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}
+        # SYFT SBOM Generator configuration (optional - uncomment to enable)
+        # - name: rhtpa.syft.enabled
+        #   value: "true"
+        # - name: rhtpa.syft.format
+        #   value: "spdx-json"
+        # - name: rhtpa.syft.images
+        #   value: |
+        #     - quay.io/qtodo/qtodo:latest
+        # Enable CronJob for scheduled scanning (optional)
+        # - name: rhtpa.syft.cronjob.enabled
+        #   value: "true"
+        # - name: rhtpa.syft.cronjob.schedule
+        #   value: "0 2 * * *"
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets

@@ -1,0 +1,193 @@
+{{- if .Values.rhtpa.enabled }}
+{{- if .Values.rhtpa.syft.enabled }}
+---
+# SYFT SBOM Generator Script
+# Generates SBOMs using SYFT and submits to RHTPA using SPIFFE JWT authentication
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-sbom-generator-script
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+data:
+  generate-sboms.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "SYFT SBOM Generator for ZTVP Applications"
+    echo "=========================================="
+    echo "Using SPIFFE JWT authentication with Vault"
+    echo ""
+    
+    # Configuration
+    VAULT_ADDR="{{ .Values.rhtpa.zeroTrust.vault.url }}"
+    VAULT_ROLE="{{ .Values.rhtpa.syft.vault.role }}"
+    JWT_PATH="/run/secrets/spiffe/jwt.token"
+    RHTPA_API_URL="{{ .Values.rhtpa.syft.rhtpaApi.url }}"
+    OUTPUT_DIR="/tmp/sboms"
+    SBOM_FORMAT="{{ .Values.rhtpa.syft.format }}"
+    
+    mkdir -p "$OUTPUT_DIR"
+    
+    # Function to authenticate with Vault using SPIFFE JWT
+    authenticate_with_vault() {
+      echo "Authenticating with Vault using SPIFFE JWT..."
+      
+      # Wait for JWT token to be generated
+      for i in {1..30}; do
+        if [ -f "$JWT_PATH" ] && [ -s "$JWT_PATH" ]; then
+          echo "JWT token found"
+          break
+        fi
+        echo "Waiting for JWT token... ($i/30)"
+        sleep 2
+      done
+      
+      if [ ! -f "$JWT_PATH" ] || [ ! -s "$JWT_PATH" ]; then
+        echo "ERROR: JWT token not found or empty at $JWT_PATH"
+        exit 1
+      fi
+      
+      # Read JWT token
+      JWT_TOKEN=$(cat "$JWT_PATH")
+      
+      # Authenticate with Vault
+      VAULT_RESPONSE=$(curl -sk -X POST "$VAULT_ADDR/v1/auth/jwt/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"role\":\"$VAULT_ROLE\",\"jwt\":\"$JWT_TOKEN\"}")
+      
+      if echo "$VAULT_RESPONSE" | jq -e '.auth.client_token' >/dev/null 2>&1; then
+        VAULT_TOKEN=$(echo "$VAULT_RESPONSE" | jq -r '.auth.client_token')
+        echo "Successfully authenticated with Vault"
+        echo "Token lease duration: $(echo "$VAULT_RESPONSE" | jq -r '.auth.lease_duration') seconds"
+        export VAULT_TOKEN
+        return 0
+      else
+        echo "ERROR: Failed to authenticate with Vault"
+        echo "Response: $VAULT_RESPONSE"
+        return 1
+      fi
+    }
+    
+    # Function to generate and submit SBOM
+    generate_and_submit_sbom() {
+      local image=$1
+      local image_name=$(echo "$image" | sed 's|.*/||' | sed 's|:|-|' | sed 's|@|-|' | sed 's/[^a-zA-Z0-9_-]/-/g')
+      local sbom_file="$OUTPUT_DIR/${image_name}-sbom.${SBOM_FORMAT}.json"
+      
+      echo ""
+      echo "Processing: $image"
+      echo "----------------------------------------"
+      
+      # Generate SBOM
+      echo "  Step 1: Generating SBOM with SYFT..."
+      if syft registry:${image} -o ${SBOM_FORMAT} > "$sbom_file" 2>/tmp/syft-error.log; then
+        echo "  SUCCESS: SBOM generated: $sbom_file"
+        
+        # Get package count
+        PACKAGE_COUNT=$(cat "$sbom_file" | jq '.packages | length' 2>/dev/null || echo "unknown")
+        echo "  Packages found: $PACKAGE_COUNT"
+        
+        # Get SBOM size
+        SBOM_SIZE=$(ls -lh "$sbom_file" | awk '{print $5}')
+        echo "  SBOM size: $SBOM_SIZE"
+      else
+        echo "  ERROR: Failed to generate SBOM for $image"
+        cat /tmp/syft-error.log
+        return 1
+      fi
+      
+      # Submit to RHTPA
+      echo "  Step 2: Submitting to RHTPA API..."
+      RESPONSE=$(curl -sk -w "\n%{http_code}" -X POST "$RHTPA_API_URL/api/v1/sbom" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $VAULT_TOKEN" \
+        -d @"$sbom_file" 2>/tmp/rhtpa-error.log)
+      
+      HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+      BODY=$(echo "$RESPONSE" | sed '$d')
+      
+      if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+        echo "  SUCCESS: SBOM submitted to RHTPA (HTTP $HTTP_CODE)"
+        ANALYSIS_ID=$(echo "$BODY" | jq -r '.id // .analysis_id // "unknown"' 2>/dev/null)
+        if [ "$ANALYSIS_ID" != "unknown" ] && [ -n "$ANALYSIS_ID" ]; then
+          echo "  Analysis ID: $ANALYSIS_ID"
+          echo "  Track status: $RHTPA_API_URL/api/v1/analysis/$ANALYSIS_ID"
+        fi
+      else
+        echo "  WARNING: Failed to submit to RHTPA (HTTP $HTTP_CODE)"
+        echo "  Response: $BODY"
+        if [ -f /tmp/rhtpa-error.log ]; then
+          cat /tmp/rhtpa-error.log
+        fi
+        return 1
+      fi
+      
+      echo "----------------------------------------"
+      return 0
+    }
+    
+    # Main execution
+    echo "Step 1: Vault Authentication"
+    echo "----------------------------"
+    if ! authenticate_with_vault; then
+      echo ""
+      echo "FATAL: Cannot proceed without Vault authentication"
+      exit 1
+    fi
+    
+    echo ""
+    echo "Step 2: SBOM Generation and Submission"
+    echo "--------------------------------------"
+    
+    # List of images to scan
+    IMAGES=(
+{{- range .Values.rhtpa.syft.images }}
+      "{{ . }}"
+{{- end }}
+    )
+    
+    if [ ${#IMAGES[@]} -eq 0 ]; then
+      echo "No images configured for scanning"
+      exit 0
+    fi
+    
+    echo "Images to scan: ${#IMAGES[@]}"
+    echo ""
+    
+    # Process all images
+    SUCCESS_COUNT=0
+    FAIL_COUNT=0
+    
+    for image in "${IMAGES[@]}"; do
+      if generate_and_submit_sbom "$image"; then
+        ((SUCCESS_COUNT++))
+      else
+        ((FAIL_COUNT++))
+      fi
+    done
+    
+    # Summary
+    echo ""
+    echo "=========================================="
+    echo "SBOM Generation Summary"
+    echo "=========================================="
+    echo "Total images: ${#IMAGES[@]}"
+    echo "Successful: $SUCCESS_COUNT"
+    echo "Failed: $FAIL_COUNT"
+    echo ""
+    echo "SBOMs stored in: $OUTPUT_DIR"
+    ls -lh "$OUTPUT_DIR" 2>/dev/null || echo "No SBOMs generated"
+    echo ""
+    
+    if [ $FAIL_COUNT -gt 0 ]; then
+      echo "Some SBOMs failed to generate or submit"
+      exit 1
+    fi
+    
+    echo "All SBOMs generated and submitted successfully!"
+    exit 0
+{{- end }}
+{{- end }}
+

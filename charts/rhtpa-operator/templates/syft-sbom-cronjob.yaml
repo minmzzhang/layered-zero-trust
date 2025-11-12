@@ -1,0 +1,157 @@
+{{- if .Values.rhtpa.enabled }}
+{{- if .Values.rhtpa.syft.enabled }}
+{{- if .Values.rhtpa.syft.cronjob.enabled }}
+---
+# CronJob for scheduled SBOM generation
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: syft-sbom-scanner
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "26"
+spec:
+  schedule: {{ .Values.rhtpa.syft.cronjob.schedule | quote }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.rhtpa.syft.job.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            app: syft-sbom-scanner
+            component: sbom-scanner
+            cronjob: "true"
+        spec:
+          serviceAccountName: syft
+          restartPolicy: {{ .Values.rhtpa.syft.job.restartPolicy }}
+          
+          # Init container to ensure SPIFFE is ready
+          initContainers:
+          - name: wait-for-spiffe
+            image: busybox:latest
+            command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for SPIFFE workload API socket..."
+              for i in $(seq 1 30); do
+                if [ -S /spiffe-workload-api/spire-agent.sock ]; then
+                  echo "SPIFFE socket found!"
+                  exit 0
+                fi
+                echo "Waiting... ($i/30)"
+                sleep 2
+              done
+              echo "ERROR: SPIFFE socket not found"
+              exit 1
+            volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /spiffe-workload-api
+              readOnly: true
+          
+          containers:
+          # SPIFFE Helper - Generates JWT tokens
+          - name: spiffe-helper
+            image: ghcr.io/spiffe/spiffe-helper:0.7.0
+            imagePullPolicy: IfNotPresent
+            args:
+            - -config
+            - /spiffe-config/helper.conf
+            env:
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: unix:///spiffe-workload-api/spire-agent.sock
+            volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /spiffe-workload-api
+              readOnly: true
+            - name: spiffe-config
+              mountPath: /spiffe-config
+              readOnly: true
+            - name: spiffe-jwt
+              mountPath: /run/secrets/spiffe
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "50m"
+              limits:
+                memory: "128Mi"
+                cpu: "100m"
+          
+          # SYFT - Generates SBOMs and submits to RHTPA
+          - name: syft
+            image: {{ .Values.rhtpa.syft.image }}
+            imagePullPolicy: IfNotPresent
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              echo "Starting scheduled SBOM scan at $(date)"
+              echo ""
+              
+              # Wait for SPIFFE helper to generate JWT
+              sleep 5
+              
+              # Execute SBOM generation script
+              /scripts/generate-sboms.sh
+              
+              echo ""
+              echo "Scheduled scan completed at $(date)"
+            env:
+            - name: VAULT_ADDR
+              value: {{ .Values.rhtpa.zeroTrust.vault.url | quote }}
+            - name: VAULT_SKIP_VERIFY
+              value: "true"
+            - name: RHTPA_API_URL
+              value: {{ .Values.rhtpa.syft.rhtpaApi.url | quote }}
+            - name: SBOM_FORMAT
+              value: {{ .Values.rhtpa.syft.format | quote }}
+            volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: spiffe-jwt
+              mountPath: /run/secrets/spiffe
+              readOnly: true
+            - name: output
+              mountPath: /tmp/sboms
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "1Gi"
+                cpu: "1000m"
+          
+          volumes:
+          # SPIFFE CSI driver volume
+          - name: spiffe-workload-api
+            csi:
+              driver: csi.spiffe.io
+              readOnly: true
+          
+          # SPIFFE helper configuration
+          - name: spiffe-config
+            configMap:
+              name: syft-spiffe-helper-config
+              defaultMode: 0644
+          
+          # Shared volume for JWT tokens
+          - name: spiffe-jwt
+            emptyDir:
+              medium: Memory
+          
+          # SBOM generation script
+          - name: script
+            configMap:
+              name: syft-sbom-generator-script
+              defaultMode: 0755
+          
+          # Output directory for SBOMs
+          - name: output
+            emptyDir: {}
+{{- end }}
+{{- end }}
+{{- end }}
+

@@ -5,22 +5,17 @@ global:
     installPlanApproval: Automatic
 
 clusterGroup:
-  name: devel
+  name: production
   isHubCluster: false
   namespaces:
     - golang-external-secrets
     - policies
-    - openshift-pipelines
     # SPIRE agent for Zero Trust identity
     - spire-system
-  subscriptions:
-    openshift-pipelines:
-      name: openshift-pipelines-operator-rh
-      namespace: openshift-operators
-      channel: latest
-      catalogSource: redhat-operators
+  # No Tekton/Pipelines on production - only deployment and verification
+  subscriptions: {}
   projects:
-    - dev
+    - prod
     - eso
   applications:
     golang-external-secrets:
@@ -34,7 +29,7 @@ clusterGroup:
     zero-trust-workload-identity-manager:
       name: zero-trust-workload-identity-manager
       namespace: spire-system
-      project: dev
+      project: prod
       path: charts/zero-trust-workload-identity-manager
       annotations:
         argocd.argoproj.io/sync-wave: "5"
@@ -48,15 +43,19 @@ clusterGroup:
           value: "true"
         - name: spire.agent.federation.bundleEndpoint
           value: "https://spire-server.apps.{{ $.Values.global.hubClusterDomain }}/bundle"
-    # Future: Tekton pipelines with SYFT for SBOM generation
-    # SYFT will run as a Tekton task, submitting to hub RHTPA API
-    # tekton-pipelines:
-    #   name: tekton-pipelines
-    #   namespace: openshift-pipelines
-    #   project: dev
-    #   path: charts/tekton-pipelines
+    # Future: Production applications
+    # qtodo-production:
+    #   name: qtodo-production
+    #   namespace: qtodo-production
+    #   project: prod
+    #   path: charts/qtodo
     #   overrides:
-    #     - name: rhtpaApiUrl
-    #       value: "https://rhtpa-server-trusted-profile-analyzer.apps.{{ $.Values.global.hubClusterDomain }}"
+    #     - name: environment
+    #       value: production
+    #     - name: replicas
+    #       value: "3"
+    #     - name: image.tag
+    #       value: "v1.2.3"  # Specific version, verified via SBOM
   sharedValueFiles:
     - '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml'
+

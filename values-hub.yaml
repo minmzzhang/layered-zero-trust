@@ -48,6 +48,11 @@ clusterGroup:
     #     labels:
     #       openshift.io/cluster-monitoring: "true"
     # UNCOMMENT if you want to deploy RHTPA
+    - rhtpa-operator:
+        operatorGroup: true
+        targetNamespace: rhtpa-operator
+        annotations:
+          argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
     - trusted-profile-analyzer:
         annotations:
           argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
@@ -117,7 +122,7 @@ clusterGroup:
     # UNCOMMENT for RHTPA operator subscriptions
     rhtpa-operator:
       name: rhtpa-operator
-      namespace: openshift-operators
+      namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
       channel: stable
       catalogSource: redhat-operators
   projects:

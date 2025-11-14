@@ -88,6 +88,19 @@ keycloak:
       realmRoles:
       - viewer
       username: rhtas-user
+    - createdTimestamp: 1
+      credentials:
+      - temporary: false
+        type: password
+        value: ${RHTPA_USER_PASSWORD}
+      email: rhtpa-user@example.com
+      emailVerified: true
+      enabled: true
+      firstName: RHTPA
+      lastName: User
+      realmRoles:
+      - viewer
+      username: rhtpa-user
   ingress:
     enabled: true
     service: keycloak-service-trusted

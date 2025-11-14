@@ -192,8 +192,8 @@ clusterGroup:
     #     argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa storage backend
     # RHTAS with SPIFFE Integration
     # Depends on: Vault, SPIRE, Keycloak
-    rhtas:
-      name: rhtas
+    trusted-artifact-signer:
+      name: trusted-artifact-signer
       namespace: trusted-artifact-signer
       project: hub
       path: charts/rhtas-operator

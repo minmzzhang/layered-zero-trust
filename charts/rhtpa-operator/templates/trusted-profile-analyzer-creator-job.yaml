@@ -65,6 +65,7 @@ spec:
     spec:
       serviceAccountName: rhtpa
       restartPolicy: OnFailure
+      shareProcessNamespace: true  # Allow containers to see each other's processes
       volumes:
       - name: script
         configMap:
@@ -98,12 +99,22 @@ spec:
           mountPath: /run/secrets/spiffe
         - name: spiffe-helper-config
           mountPath: /etc/spiffe-helper
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 5"]
       # Main container
       - name: create-cr
         image: registry.redhat.io/openshift4/ose-cli:latest
         command:
         - /bin/bash
-        - /scripts/create-cr.sh
+        - -c
+        - |
+          /scripts/create-cr.sh
+          # Signal completion and give time for cleanup
+          sleep 3
+          # Kill spiffe-helper sidecar to allow Job to complete
+          killall spiffe-helper 2>/dev/null || true
         env:
         - name: VAULT_ADDR
           value: {{ .Values.rhtpa.zeroTrust.vault.url | quote }}

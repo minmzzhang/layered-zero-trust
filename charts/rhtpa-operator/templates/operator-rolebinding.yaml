@@ -1,5 +1,5 @@
 ---
-# Role to allow RHTPA operator to manage jobs in rhtpa-system namespace
+# Role to allow RHTPA operator to manage jobs in trusted-profile-analyzer namespace
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

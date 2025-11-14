@@ -48,12 +48,7 @@ clusterGroup:
     #     labels:
     #       openshift.io/cluster-monitoring: "true"
     # UNCOMMENT if you want to deploy RHTPA
-    - rhtpa-operator:
-        operatorGroup: true
-        targetNamespace: rhtpa-system
-        annotations:
-          argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
-    - rhtpa-system:
+    - trusted-profile-analyzer:
         annotations:
           argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
         labels:
@@ -122,7 +117,7 @@ clusterGroup:
     # UNCOMMENT for RHTPA operator subscriptions
     rhtpa-operator:
       name: rhtpa-operator
-      namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
+      namespace: openshift-operators
       channel: stable
       catalogSource: redhat-operators
   projects:
@@ -202,13 +197,13 @@ clusterGroup:
           # Remove bound_subject in actual Vault configuration and rely on audience matching
           - name: rhtpa
             audience: rhtpa
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtpa-system/sa/rhtpa
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/rhtpa
             policies:
               - global-secret
           # SYFT vault role (for SBOM generation)
           - name: syft
             audience: syft
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/rhtpa-system/sa/syft
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/syft
             policies:
               - global-secret
     # Shared Object Storage Backend
@@ -255,9 +250,9 @@ clusterGroup:
     #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}
     # RHTPA (Red Hat Trusted Profile Analyzer) with SPIFFE Integration
     # Depends on: NooBaa MCG (storage), Vault (secrets), SPIRE (identity), Keycloak (auth)
-    rhtpa:
-      name: rhtpa
-      namespace: rhtpa-system
+    trusted-profile-analyzer:
+      name: trusted-profile-analyzer
+      namespace: trusted-profile-analyzer
       project: hub
       path: charts/rhtpa-operator
       annotations:

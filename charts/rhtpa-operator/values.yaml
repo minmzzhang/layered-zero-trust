@@ -10,7 +10,7 @@ rhtpa:
   name: "trusted-profile-analyzer"
   
   # Namespace for RHTPA deployment
-  namespace: rhtpa-system
+  namespace: trusted-profile-analyzer
   
   # Zero Trust Integration
   zeroTrust:

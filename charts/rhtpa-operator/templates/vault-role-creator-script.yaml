@@ -1,0 +1,119 @@
+{{- if .Values.rhtpa.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-role-creator-script
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "17"
+data:
+  create-vault-roles.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Creating Vault JWT auth roles for RHTPA..."
+    
+    # Wait for Vault to be ready
+    echo "Waiting for Vault to be ready..."
+    for i in {1..30}; do
+      if oc exec -n vault vault-0 -- vault status >/dev/null 2>&1; then
+        echo "Vault is ready"
+        break
+      fi
+      echo "Waiting for Vault... ($i/30)"
+      sleep 2
+    done
+    
+    # Get the actual cluster domain from the cluster
+    CLUSTER_DOMAIN=$(oc get dns cluster -o jsonpath='{.spec.baseDomain}')
+    echo "Cluster domain: ${CLUSTER_DOMAIN}"
+    
+    # Define the RHTPA role configuration
+    RHTPA_ROLE_NAME="rhtpa"
+    RHTPA_AUDIENCE="rhtpa"
+    RHTPA_SUBJECT="spiffe://apps.${CLUSTER_DOMAIN}/ns/{{ .Values.rhtpa.namespace }}/sa/rhtpa"
+    RHTPA_POLICY="{{ .Values.rhtpa.zeroTrust.vault.policy }}"
+    
+    # Define the SYFT role configuration
+    SYFT_ROLE_NAME="syft"
+    SYFT_AUDIENCE="syft"
+    SYFT_SUBJECT="spiffe://apps.${CLUSTER_DOMAIN}/ns/{{ .Values.rhtpa.namespace }}/sa/syft"
+    SYFT_POLICY="{{ .Values.rhtpa.zeroTrust.vault.policy }}"
+    
+    # Function to create or update a Vault JWT role
+    create_vault_role() {
+      local role_name=$1
+      local audience=$2
+      local subject=$3
+      local policy=$4
+      
+      echo ""
+      echo "Processing role: ${role_name}"
+      echo "  Audience: ${audience}"
+      echo "  Subject: ${subject}"
+      echo "  Policy: ${policy}"
+      
+      # Check if role exists
+      if oc exec -n vault vault-0 -- vault read auth/jwt/role/${role_name} >/dev/null 2>&1; then
+        echo "Role '${role_name}' already exists"
+        
+        # Get current configuration
+        CURRENT_CONFIG=$(oc exec -n vault vault-0 -- vault read -format=json auth/jwt/role/${role_name})
+        CURRENT_AUDIENCE=$(echo "$CURRENT_CONFIG" | jq -r '.data.bound_audiences[0]')
+        CURRENT_SUBJECT=$(echo "$CURRENT_CONFIG" | jq -r '.data.bound_subject')
+        CURRENT_POLICY=$(echo "$CURRENT_CONFIG" | jq -r '.data.token_policies[0]')
+        
+        # Check if update is needed
+        if [ "$CURRENT_AUDIENCE" != "$audience" ] || [ "$CURRENT_SUBJECT" != "$subject" ] || [ "$CURRENT_POLICY" != "$policy" ]; then
+          echo "Role configuration differs, updating..."
+          echo "  Current - Audience: ${CURRENT_AUDIENCE}, Subject: ${CURRENT_SUBJECT}, Policy: ${CURRENT_POLICY}"
+          echo "  Desired - Audience: ${audience}, Subject: ${subject}, Policy: ${policy}"
+          
+          oc exec -n vault vault-0 -- vault write auth/jwt/role/${role_name} \
+            role_type=jwt \
+            bound_audiences=${audience} \
+            user_claim=sub \
+            bound_subject="${subject}" \
+            policies=${policy} \
+            ttl=1h
+          
+          echo "Role '${role_name}' updated successfully"
+        else
+          echo "Role '${role_name}' is already correctly configured"
+        fi
+      else
+        echo "Creating role '${role_name}'..."
+        
+        oc exec -n vault vault-0 -- vault write auth/jwt/role/${role_name} \
+          role_type=jwt \
+          bound_audiences=${audience} \
+          user_claim=sub \
+          bound_subject="${subject}" \
+          policies=${policy} \
+          ttl=1h
+        
+        echo "Role '${role_name}' created successfully"
+      fi
+    }
+    
+    # Create RHTPA role
+    create_vault_role "${RHTPA_ROLE_NAME}" "${RHTPA_AUDIENCE}" "${RHTPA_SUBJECT}" "${RHTPA_POLICY}"
+    
+    # Create SYFT role (if SYFT is enabled)
+    {{- if .Values.rhtpa.syft.enabled }}
+    create_vault_role "${SYFT_ROLE_NAME}" "${SYFT_AUDIENCE}" "${SYFT_SUBJECT}" "${SYFT_POLICY}"
+    {{- else }}
+    echo ""
+    echo "SYFT is disabled, skipping SYFT role creation"
+    {{- end }}
+    
+    echo ""
+    echo "All Vault JWT roles created/verified successfully!"
+    
+    # List all JWT roles for verification
+    echo ""
+    echo "Current JWT roles in Vault:"
+    oc exec -n vault vault-0 -- vault list auth/jwt/role
+{{- end }}
+

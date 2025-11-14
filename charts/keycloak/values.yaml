@@ -34,14 +34,6 @@ keycloak:
       - +
       attributes:
         oauth2.device.authorization.grant.enabled: 'true'
-      protocolMappers:
-      - name: rhtas-audience
-        protocol: openid-connect
-        protocolMapper: oidc-audience-mapper
-        config:
-          included.client.audience: 'trusted-artifact-signer'
-          included.custom.audience: 'trusted-artifact-signer'
-          access.token.claim: 'true'
     displayName: ZTVP Realm
     enabled: true
     realm: ztvp

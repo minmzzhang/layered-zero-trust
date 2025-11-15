@@ -67,7 +67,7 @@ spec:
       # Init container to ensure SPIFFE is ready
       initContainers:
       - name: wait-for-spiffe
-        image: busybox:latest
+        image: {{ .Values.rhtpa.syft.initImage }}
         command:
         - sh
         - -c

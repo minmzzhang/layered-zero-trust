@@ -86,6 +86,7 @@ rhtpa:
   syft:
     enabled: false  # Set to true to enable standalone SBOM generation
     image: "anchore/syft:latest"
+    initImage: "quay.io/quay/busybox:latest"  # Init container image (avoid Docker Hub rate limits)
     format: "spdx-json"  # Options: spdx-json, cyclonedx-json, syft-json
     
     # SPIFFE/JWT Authentication

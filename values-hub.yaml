@@ -436,11 +436,11 @@ acmManagedClusters:
         cloud: AWS
         vendor: OpenShift
         environment: development
-      kubeconfigVaultPath: hub/kubeconfig-ztvp-dev
+      kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-dev
     - name: ztvp-prod
       clusterGroup: production
       labels:
         cloud: AWS
         vendor: OpenShift
         environment: production
-      kubeconfigVaultPath: hub/kubeconfig-ztvp-prod
+      kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-prod

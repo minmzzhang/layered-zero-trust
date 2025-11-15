@@ -284,9 +284,8 @@ clusterGroup:
           value: "true"
         - name: rhtpa.syft.format
           value: "spdx-json"
-        - name: rhtpa.syft.images
-          value: |
-            - quay.io/qtodo/qtodo:latest
+        - name: rhtpa.syft.images[0]
+          value: "quay.io/qtodo/qtodo:latest"
         # Enable CronJob for scheduled scanning
         - name: rhtpa.syft.cronjob.enabled
           value: "true"

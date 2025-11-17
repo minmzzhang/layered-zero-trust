@@ -69,10 +69,14 @@ data:
     }
     
     # Function to upload file to RHTPA API
+    # Uses /api/v2/sbom endpoint which automatically:
+    #   - Stores SBOM JSON as object in S3 bucket
+    #   - Stores correlation metadata in Postgres
+    # Reference: https://github.com/guacsec/trustify-ui/blob/main/e2e/tests/api/dependencies/global.setup.ts#L38
     upload_to_api() {
       local file_path=$1
       
-      echo "    Uploading to RHTPA API: $RHTPA_API_URL"
+      echo "    Uploading to RHTPA API: $RHTPA_API_URL/api/v2/sbom"
       export SBOM_FILE="$file_path"
       
       python3 /scripts/rhtpa-api-upload.py

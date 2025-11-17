@@ -12,4 +12,10 @@ spec:
     k8sEnabled: {{ .Values.spire.agent.workloadAttestors.k8sEnabled | quote }}
     workloadAttestorsVerification:
       type: {{ .Values.spire.agent.workloadAttestors.workloadAttestorsVerification.type}}
+{{- if .Values.spire.agent.federation }}
+{{- if .Values.spire.agent.federation.enabled }}
+  federationRelationships:
+    - bundleEndpoint: {{ tpl .Values.spire.agent.federation.bundleEndpoint $ }}
+{{- end }}
+{{- end }}
 {{- end }}

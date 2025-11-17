@@ -119,12 +119,16 @@ clusterGroup:
     #   annotations:
     #     argocd.argoproj.io/sync-wave: "-2"  # Install after Quay operator, before applications
     #   catalogSource: redhat-operators
-    # UNCOMMENT for RHTPA operator subscriptions
+    # RHTPA operator subscription
+    # Channel: stable-v1.1 provides latest 1.1.x patch updates
+    # Note: No direct upgrade path from 1.1.x to 2.x (requires fresh install)
     rhtpa-operator:
       name: rhtpa-operator
       namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
-      channel: stable
+      channel: stable-v1.1  # Use stable-v1.1 channel for 1.1.x updates
       catalogSource: redhat-operators
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5), before applications
   projects:
     - hub
   # Explicitly mention the cluster-state based overrides we plan to use for this pattern.
@@ -167,6 +171,17 @@ clusterGroup:
       name: acm-managed-clusters
       project: hub
       path: charts/acm-managed-clusters
+      ignoreDifferences:
+        - group: cluster.open-cluster-management.io
+          kind: ManagedClusterInfo
+          jsonPointers:
+            - /metadata
+            - /status
+        - group: policy.open-cluster-management.io
+          kind: Policy
+          jsonPointers:
+            - /metadata
+            - /status
     compliance-scanning:
       name: compliance-scanning
       namespace: openshift-compliance
@@ -188,13 +203,13 @@ clusterGroup:
         roles:
           - name: qtodo
             audience: qtodo
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/qtodo/sa/qtodo
+            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/qtodo/sa/qtodo"
             policies:
               - global-secret
           # UNCOMMENT for RHTAS vault role
           # - name: rhtas
           #   audience: rhtas
-          #   subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-artifact-signer/sa/*
+          #   subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-artifact-signer/sa/*"
           #   policies:
           #     - global-secret
           # RHTPA vault role
@@ -202,19 +217,19 @@ clusterGroup:
           # Remove bound_subject in actual Vault configuration and rely on audience matching
           - name: rhtpa
             audience: rhtpa
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/rhtpa
+            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/rhtpa"
             policies:
               - global-secret
           # SYFT vault role (for SBOM generation)
           - name: syft
             audience: syft
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/syft
+            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/syft"
             policies:
               - global-secret
           # Image Discovery vault role (for production cluster credential retrieval)
           - name: image-discovery
             audience: vault
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/image-discovery
+            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/image-discovery"
             policies:
               - global-secret
     # Shared Object Storage Backend
@@ -276,6 +291,7 @@ clusterGroup:
     #       value: https://vault.vault.svc.cluster.local:8200
     #     - name: rhtpa.zeroTrust.keycloak.url
     #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}
+<<<<<<< HEAD
     #     # SYFT SBOM Generator - DISABLED on Hub
     #     # 
     #     # PRODUCTION ARCHITECTURE:
@@ -299,6 +315,47 @@ clusterGroup:
     #       value: "30m"  # CVE importer period: 30 minutes
     #     - name: rhtpa.modules.createImporters.importers.osv-github.osv.period
     #       value: "30m"  # OSV-GitHub importer period: 30 minutes
+=======
+    # RHTPA (Red Hat Trusted Profile Analyzer) with SPIFFE Integration
+    # Depends on: NooBaa MCG (storage), Vault (secrets), SPIRE (identity), Keycloak (auth)
+    trusted-profile-analyzer:
+      name: trusted-profile-analyzer
+      namespace: trusted-profile-analyzer
+      project: hub
+      path: charts/rhtpa-operator
+      annotations:
+        argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa and dependencies
+      overrides:
+        - name: rhtpa.zeroTrust.spire.trustDomain
+          value: apps.{{ .Values.global.clusterDomain }}
+        - name: rhtpa.zeroTrust.vault.url
+          value: https://vault.vault.svc.cluster.local:8200
+        - name: rhtpa.zeroTrust.keycloak.url
+          value: https://keycloak.{{ .Values.global.clusterDomain }}
+        # SYFT SBOM Generator - DISABLED on Hub
+        # 
+        # PRODUCTION ARCHITECTURE:
+        #   - SYFT runs on dev spoke cluster (see values-devel.yaml)
+        #   - Scans production cluster images via ACM
+        #   - Submits SBOMs to hub RHTPA API
+        #   - Hub only runs RHTPA (Trustify) for SBOM storage/analysis
+        # 
+        # CURRENT CONFIG: SYFT disabled on hub
+        #   - Hub provides RHTPA API endpoint
+        #   - Dev spoke runs SYFT scanner
+        #   - No scanning load on hub cluster
+        - name: rhtpa.syft.enabled
+          value: false
+        - name: rhtpa.imageDiscovery.enabled
+          value: false
+        # Importer Period Configuration
+        # Override default period (1d) for hub cluster to run more frequently
+        # Supported formats: 15m, 30m, 1h, 6h, 12h, 1d
+        - name: rhtpa.modules.createImporters.importers.cve.cve.period
+          value: "30m"  # CVE importer period: 30 minutes
+        - name: rhtpa.modules.createImporters.importers.osv-github.osv.period
+          value: "30m"  # OSV-GitHub importer period: 30 minutes
+>>>>>>> 170f74e (feat: integrate RHTPA with SPIFFE authentication and SYFT SBOM generation)
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets
@@ -354,6 +411,14 @@ clusterGroup:
       helmOverrides:
         - name: clusterGroup.isHubCluster
           value: false
+        # Hub cluster domain - passed from hub to spoke for cross-cluster operations
+        - name: global.hubClusterDomain
+          value: "{{ .Values.global.hubClusterDomain }}"
+        # Production cluster info for image discovery
+        # Format: https://api.{clusterName}.{baseDomain}:6443
+        # baseDomain is derived from hub's clusterDomain (e.g., apps.ztvp-hub.example.com -> example.com)
+        - name: global.productionClusterName
+          value: ztvp-prod
       clusterSelector:
         matchLabels:
           clusterGroup: devel
@@ -362,11 +427,37 @@ clusterGroup:
             operator: In
             values:
               - OpenShift
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - RespectIgnoreDifferences=true
+          - SkipDryRunOnMissingResource=true
+          - ApplyOutOfSyncOnly=true
+        ignoreDifferences:
+          - group: ""
+            kind: Namespace
+            jsonPointers:
+              - /metadata
+          - group: ""
+            kind: ConfigMap
+            jsonPointers:
+              - /metadata
+          - group: operators.coreos.com
+            kind: OperatorGroup
+            jsonPointers:
+              - /metadata
+          - group: operators.coreos.com
+            kind: Subscription
+            jsonPointers:
+              - /status
     production:
       name: production
       helmOverrides:
         - name: clusterGroup.isHubCluster
           value: false
+        # Hub cluster domain - passed from hub to spoke for cross-cluster operations
+        - name: global.hubClusterDomain
+          value: "{{ .Values.global.hubClusterDomain }}"
       clusterSelector:
         matchLabels:
           clusterGroup: production
@@ -375,6 +466,29 @@ clusterGroup:
             operator: In
             values:
               - OpenShift
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - RespectIgnoreDifferences=true
+          - SkipDryRunOnMissingResource=true
+          - ApplyOutOfSyncOnly=true
+        ignoreDifferences:
+          - group: ""
+            kind: Namespace
+            jsonPointers:
+              - /metadata
+          - group: ""
+            kind: ConfigMap
+            jsonPointers:
+              - /metadata
+          - group: operators.coreos.com
+            kind: OperatorGroup
+            jsonPointers:
+              - /metadata
+          - group: operators.coreos.com
+            kind: Subscription
+            jsonPointers:
+              - /status
 
     # exampleRegion:
     #   name: group-one

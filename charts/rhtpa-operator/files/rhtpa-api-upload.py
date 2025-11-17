@@ -37,7 +37,9 @@ def get_oidc_token(issuer_url, client_id, client_secret):
         sys.exit(1)
 
 def upload_sbom(api_url, token, file_path):
-    upload_url = urljoin(api_url, "/api/v1/sbom")
+    # Use v2 API endpoint - automatically stores SBOM in S3 and metadata in Postgres
+    # Reference: https://github.com/guacsec/trustify-ui/blob/main/e2e/tests/api/dependencies/global.setup.ts#L38
+    upload_url = urljoin(api_url, "/api/v2/sbom")
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"

@@ -34,6 +34,7 @@ keycloak:
       - +
       attributes:
         oauth2.device.authorization.grant.enabled: 'true'
+<<<<<<< HEAD
       protocolMappers:
       - name: audience-mapper
         protocol: openid-connect
@@ -42,6 +43,8 @@ keycloak:
           included.client.audience: trusted-artifact-signer
           access.token.claim: 'true'
           id.token.claim: 'false'
+=======
+>>>>>>> 170f74e (feat: integrate RHTPA with SPIFFE authentication and SYFT SBOM generation)
     - clientId: oidc-cli
       enabled: true
       name: RHTPA CLI Client

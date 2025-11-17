@@ -4,7 +4,7 @@
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: hub-gitops-ca-{{ $group.name }}-policy
+  name: spire-bundle-{{ $group.name }}-policy
   namespace: open-cluster-management
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
@@ -17,7 +17,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: hub-gitops-ca-{{ $group.name }}-config
+          name: spire-bundle-{{ $group.name }}-config
         spec:
           remediationAction: enforce
           severity: medium
@@ -30,45 +30,32 @@ spec:
                 kind: ConfigMap
                 apiVersion: v1
                 metadata:
-                  name: trusted-hub-bundle
-                  namespace: openshift-gitops
+                  name: spire-bundle
+                  namespace: zero-trust-workload-identity-manager
                 data:
-                  hub-kube-root-ca.crt: |
-                    {{ `{{hub fromConfigMap "" "kube-root-ca.crt" "ca.crt" | autoindent hub}}` }}
-                  hub-openshift-service-ca.crt: |
-                    {{ `{{hub fromConfigMap "" "openshift-service-ca.crt" "service-ca.crt" | autoindent hub}}` }}
-            - complianceType: mustonlyhave
-              objectDefinition:
-                kind: Secret
-                apiVersion: v1
-                metadata:
-                  name: hub-ca
-                  namespace: golang-external-secrets
-                type: Opaque
-                stringData:
-                  hub-kube-root-ca.crt: |
-                    {{ `{{hub fromConfigMap "" "kube-root-ca.crt" "ca.crt" | autoindent hub}}` }}
+                  bundle.crt: |
+                    {{ `{{hub fromConfigMap "zero-trust-workload-identity-manager" "spire-bundle" "bundle.crt" | autoindent hub}}` }}
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: hub-gitops-ca-{{ $group.name }}-placement-binding
+  name: spire-bundle-{{ $group.name }}-placement-binding
   namespace: open-cluster-management
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 placementRef:
-  name: hub-gitops-ca-{{ $group.name }}-placement
+  name: spire-bundle-{{ $group.name }}-placement
   kind: PlacementRule
   apiGroup: apps.open-cluster-management.io
 subjects:
-  - name: hub-gitops-ca-{{ $group.name }}-policy
+  - name: spire-bundle-{{ $group.name }}-policy
     kind: Policy
     apiGroup: policy.open-cluster-management.io
 ---
 apiVersion: apps.open-cluster-management.io/v1
 kind: PlacementRule
 metadata:
-  name: hub-gitops-ca-{{ $group.name }}-placement
+  name: spire-bundle-{{ $group.name }}-placement
   namespace: open-cluster-management
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
@@ -85,3 +72,5 @@ spec:
     matchLabels:
       clusterGroup: {{ $group.name }}
 {{- end }}
+
+

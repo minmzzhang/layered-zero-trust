@@ -1,0 +1,298 @@
+{{- if .Values.rhtpa.syft.enabled }}
+---
+# ServiceAccount for SYFT SBOM Generator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: syft
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+---
+# Role for SYFT (minimal permissions)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: syft-sbom-generator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: syft-sbom-generator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: syft-sbom-generator
+subjects:
+- kind: ServiceAccount
+  name: syft
+  namespace: {{ .Values.rhtpa.namespace }}
+---
+# ConfigMap for Python S3 upload script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-python-scripts
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+data:
+  s3-upload.py: {{ .Files.Get "files/s3-upload.py" | quote }}
+  rhtpa-api-upload.py: {{ .Files.Get "files/rhtpa-api-upload.py" | quote }}
+---
+# ConfigMap for OpenShift service CA bundle (auto-injected)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-service-ca
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+    service.beta.openshift.io/inject-cabundle: "true"
+data: {}
+---
+# Job to generate SBOMs with SPIFFE JWT authentication
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: syft-sbom-generator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: {{ .Values.rhtpa.syft.job.backoffLimit }}
+  # Note: TTL disabled for ArgoCD hook jobs - ArgoCD manages lifecycle via hook-delete-policy
+  template:
+    metadata:
+      name: syft-sbom-generator
+      labels:
+        app: syft-sbom-generator
+        component: sbom-scanner
+    spec:
+      serviceAccountName: syft
+      restartPolicy: {{ .Values.rhtpa.syft.job.restartPolicy }}
+      shareProcessNamespace: true  # Allow containers to signal each other
+      
+      # Init container to ensure SPIFFE is ready
+      initContainers:
+      - name: wait-for-spiffe
+        image: {{ .Values.rhtpa.syft.initImage }}
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for SPIFFE workload API socket..."
+          for i in $(seq 1 30); do
+            if [ -S /spiffe-workload-api/spire-agent.sock ]; then
+              echo "SPIFFE socket found!"
+              exit 0
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+          echo "ERROR: SPIFFE socket not found"
+          exit 1
+        volumeMounts:
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+      
+      containers:
+      # SPIFFE Helper - Generates JWT tokens
+      - name: spiffe-helper
+        image: ghcr.io/spiffe/spiffe-helper:0.10.1
+        imagePullPolicy: IfNotPresent
+        args:
+        - -config
+        - /spiffe-config/helper.conf
+        env:
+        - name: SPIFFE_ENDPOINT_SOCKET
+          value: unix:///spiffe-workload-api/spire-agent.sock
+        volumeMounts:
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+        - name: spiffe-config
+          mountPath: /spiffe-config
+          readOnly: true
+        - name: spiffe-jwt
+          mountPath: /run/secrets/spiffe
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      
+      # SYFT - Generates SBOMs and submits to RHTPA
+      - name: syft
+        image: {{ .Values.rhtpa.syft.image }}
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+          echo "Installing syft and dependencies..."
+          
+          # Install to /tmp (world writable, avoids permission issues)
+          mkdir -p /tmp/bin
+          export PATH="/tmp/bin:$HOME/.local/bin:$PATH"
+          
+          # Install Python packages for S3 upload
+          echo "Installing Python packages (boto3 for S3)..."
+          # Install pip if not available
+          curl -sSfL https://bootstrap.pypa.io/get-pip.py | python3 - --user
+          # Install boto3 and urllib3 for S3 operations
+          python3 -m pip install --user --no-warn-script-location boto3 urllib3
+          
+          # Install syft
+          echo "Installing syft..."
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /tmp/bin
+          
+          # Install jq (static binary, no root needed)
+          echo "Installing jq..."
+          curl -sSfL -o /tmp/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+          chmod +x /tmp/bin/jq
+          
+          echo "Dependencies installed successfully"
+          echo "Syft version: $(syft version 2>&1 | head -1)"
+          echo "JQ version: $(jq --version)"
+          echo "Boto3 version: $(python3 -c 'import boto3; print(boto3.__version__)')"
+          
+          # Wait for SPIFFE helper to generate JWT
+          echo "Waiting for SPIFFE helper to generate JWT token..."
+          sleep 10
+          
+          # Execute SBOM generation script
+          /scripts/generate-sboms.sh
+        env:
+        - name: HOME
+          value: "/tmp"
+        - name: SYFT_CACHE_DIR
+          value: "/tmp/.cache/syft"
+        - name: VAULT_ADDR
+          value: {{ .Values.rhtpa.zeroTrust.vault.url | quote }}
+        - name: VAULT_SKIP_VERIFY
+          value: "true"
+        - name: SBOM_FORMAT
+          value: {{ .Values.rhtpa.syft.format | quote }}
+        # RHTPA API Upload Configuration
+        - name: RHTPA_API_URL
+          {{- if .Values.rhtpa.syft.apiUrl }}
+          value: {{ .Values.rhtpa.syft.apiUrl | quote }}
+          {{- else }}
+          value: "http://trustify-server.{{ .Values.rhtpa.namespace }}.svc.cluster.local:8080"
+          {{- end }}
+        - name: OIDC_ISSUER_URL
+          value: {{ include "rhtpa-operator.keycloakOIDCIssuer" . | quote }}
+        - name: OIDC_CLIENT_ID
+          value: "oidc-cli"
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oidc-cli
+              key: client-secret
+              optional: true
+        # S3 Storage credentials from secret
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rhtpa-s3-storage
+              key: AWS_ACCESS_KEY_ID
+              optional: true
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rhtpa-s3-storage
+              key: AWS_SECRET_ACCESS_KEY
+              optional: true
+        # S3 Storage configuration from configmap
+        - name: S3_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: rhtpa-s3-storage
+              key: BUCKET_NAME
+              optional: true
+        - name: S3_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: rhtpa-s3-storage
+              key: BUCKET_HOST
+              optional: true
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+          readOnly: true
+        - name: spiffe-jwt
+          mountPath: /run/secrets/spiffe
+          readOnly: true
+        - name: output
+          mountPath: /tmp/sboms
+        - name: service-ca
+          mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      
+      volumes:
+      # SPIFFE CSI driver volume
+      - name: spiffe-workload-api
+        csi:
+          driver: csi.spiffe.io
+          readOnly: true
+      
+      # SPIFFE helper configuration
+      - name: spiffe-config
+        configMap:
+          name: syft-spiffe-helper-config
+          defaultMode: 0644
+      
+      # Shared volume for JWT tokens
+      - name: spiffe-jwt
+        emptyDir:
+          medium: Memory
+      
+      # SBOM generation scripts (bash and Python)
+      - name: script
+        projected:
+          defaultMode: 0755
+          sources:
+          - configMap:
+              name: syft-sbom-generator-script
+          - configMap:
+              name: syft-python-scripts
+      
+      # OpenShift service CA bundle for SSL verification
+      - name: service-ca
+        configMap:
+          name: syft-service-ca
+          items:
+          - key: service-ca.crt
+            path: service-ca.crt
+      
+      # Output directory for SBOMs
+      - name: output
+        emptyDir: {}
+{{- end }}
+

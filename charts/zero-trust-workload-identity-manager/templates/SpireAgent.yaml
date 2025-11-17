@@ -1,3 +1,4 @@
+{{- if .Values.spire.agent.enabled }}
 apiVersion: operator.openshift.io/v1alpha1
 kind: SpireAgent
 metadata:
@@ -11,3 +12,4 @@ spec:
     k8sEnabled: {{ .Values.spire.agent.workloadAttestors.k8sEnabled | quote }}
     workloadAttestorsVerification:
       type: {{ .Values.spire.agent.workloadAttestors.workloadAttestorsVerification.type}}
+{{- end }}

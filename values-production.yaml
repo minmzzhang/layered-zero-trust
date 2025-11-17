@@ -1,0 +1,77 @@
+global:
+  options:
+    useCSV: False
+    syncPolicy: Automatic
+    installPlanApproval: Automatic
+
+clusterGroup:
+  name: production
+  isHubCluster: false
+  namespaces:
+    - golang-external-secrets
+    - policies
+    - qtodo-production  # Production application namespace
+    # COMMENTED OUT for default submission - uncomment to enable SPIRE federation
+    # SPIRE agent for Zero Trust identity
+    # - spire-system
+  # No Tekton/Pipelines on production - only deployment and verification
+  subscriptions: {}
+  # COMMENTED OUT: Uncomment when enabling SPIRE/ZTWIM in production
+  # zero-trust-workload-identity-manager:
+  #   name: openshift-zero-trust-workload-identity-manager
+  #   namespace: zero-trust-workload-identity-manager
+  #   channel: tech-preview-v0.2
+  #   catalogSource: redhat-marketplace
+  #   annotations:
+  #     argocd.argoproj.io/sync-wave: "-4"  # Install before ZTWIM application (wave 5)
+  projects:
+    - prod
+    - eso
+  applications:
+    golang-external-secrets:
+      name: golang-external-secrets
+      namespace: golang-external-secrets
+      project: eso
+      chart: golang-external-secrets
+      chartVersion: 0.1.*
+      annotations:
+        argocd.argoproj.io/sync-wave: "1"  # Create after AppProjects (wave 0)
+    # COMMENTED OUT for default submission - uncomment to enable SPIRE federation
+    # SPIRE Agent for Zero Trust workload identity
+    # Federates with hub SPIRE server for secure cross-cluster communication
+    # zero-trust-workload-identity-manager:
+    #   name: zero-trust-workload-identity-manager
+    #   namespace: spire-system
+    #   project: prod
+    #   path: charts/zero-trust-workload-identity-manager
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "5"
+    #   overrides:
+    #     - name: spire.server.enabled
+    #       value: "false"
+    #     - name: spire.agent.enabled
+    #       value: "true"
+    #     # Federation with hub SPIRE server
+    #     - name: spire.agent.federation.enabled
+    #       value: "true"
+    #     - name: spire.agent.federation.bundleEndpoint
+    #       value: "https://spire-server.apps.{{ $.Values.global.hubClusterDomain }}/bundle"
+    # Production application for testing SBOM scanning
+    qtodo-production:
+      name: qtodo-production
+      namespace: qtodo-production
+      project: prod
+      path: charts/qtodo
+      overrides:
+        - name: environment
+          value: production
+        - name: replicas
+          value: "3"
+        # Disable SPIRE/OIDC for simplified production deployment
+        - name: app.spire.enabled
+          value: false
+        - name: app.oidc.enabled
+          value: false
+  sharedValueFiles:
+    - '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml'
+

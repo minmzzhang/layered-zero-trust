@@ -1,0 +1,79 @@
+{{- if .Values.rhtpa.enabled }}
+{{- if .Values.rhtpa.objectStorage.enabled }}
+{{- if .Values.rhtpa.objectStorage.endpoint }}
+---
+# Patch to add S3 endpoint for NooBaa MCG
+# The RHTPA operator's Helm chart doesn't support custom S3 endpoints in the CR,
+# so we patch the deployments after they're created by the operator
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rhtpa-s3-endpoint-patch
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/sync-wave: "25"  # After RHTPA is deployed
+spec:
+  template:
+    spec:
+      serviceAccountName: rhtpa
+      restartPolicy: OnFailure
+      containers:
+      - name: patch-deployments
+        image: registry.redhat.io/openshift4/ose-cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          #!/bin/bash
+          set -e
+          
+          echo "Patching RHTPA deployments with S3 endpoint..."
+          S3_ENDPOINT="{{ .Values.rhtpa.objectStorage.endpoint }}"
+          
+          # Wait for deployments to exist
+          echo "Waiting for server deployment..."
+          for i in {1..60}; do
+            if oc get deployment server -n {{ .Values.rhtpa.namespace }} >/dev/null 2>&1; then
+              echo "Server deployment found"
+              break
+            fi
+            echo "  Waiting... ($i/60)"
+            sleep 5
+          done
+          
+          echo "Waiting for importer deployment..."
+          for i in {1..60}; do
+            if oc get deployment importer -n {{ .Values.rhtpa.namespace }} >/dev/null 2>&1; then
+              echo "Importer deployment found"
+              break
+            fi
+            echo "  Waiting... ($i/60)"
+            sleep 5
+          done
+          
+          # Patch server deployment
+          echo ""
+          echo "Patching server deployment with TRUSTD_S3_ENDPOINT=${S3_ENDPOINT}..."
+          oc set env deployment/server -n {{ .Values.rhtpa.namespace }} \
+            TRUSTD_S3_ENDPOINT="${S3_ENDPOINT}" || {
+            echo "ERROR: Failed to patch server deployment"
+            exit 1
+          }
+          
+          # Patch importer deployment
+          echo "Patching importer deployment with TRUSTD_S3_ENDPOINT=${S3_ENDPOINT}..."
+          oc set env deployment/importer -n {{ .Values.rhtpa.namespace }} \
+            TRUSTD_S3_ENDPOINT="${S3_ENDPOINT}" || {
+            echo "ERROR: Failed to patch importer deployment"
+            exit 1
+          }
+          
+          echo ""
+          echo "Successfully patched both deployments!"
+          echo "Server and importer will restart with S3 endpoint configuration."
+{{- end }}
+{{- end }}
+{{- end }}
+

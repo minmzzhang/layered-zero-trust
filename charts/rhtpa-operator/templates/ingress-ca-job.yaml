@@ -1,0 +1,106 @@
+{{- if .Values.rhtpa.tls.ingressCA.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rhtpa-ingress-ca-extractor
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/hook: PreSync
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rhtpa-ingress-ca-extractor
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/hook: PreSync
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhtpa-ingress-ca-extractor
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/hook: PreSync
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rhtpa-ingress-ca-extractor
+subjects:
+- kind: ServiceAccount
+  name: rhtpa-ingress-ca-extractor
+  namespace: {{ .Values.rhtpa.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rhtpa-ingress-ca-reader
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/hook: PreSync
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["router-certs-default"]
+  verbs: ["get"]
+  # Note: This requires the secret to be in openshift-ingress namespace
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rhtpa-ingress-ca-reader-{{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/hook: PreSync
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rhtpa-ingress-ca-reader
+subjects:
+- kind: ServiceAccount
+  name: rhtpa-ingress-ca-extractor
+  namespace: {{ .Values.rhtpa.namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rhtpa-ingress-ca-extractor
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  template:
+    spec:
+      serviceAccountName: rhtpa-ingress-ca-extractor
+      restartPolicy: OnFailure
+      containers:
+      - name: extractor
+        image: registry.redhat.io/openshift4/ose-cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Extracting OpenShift ingress CA certificate..."
+          
+          # Extract the certificate from the ingress secret
+          oc get secret router-certs-default -n openshift-ingress -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/ca.crt
+          
+          # Create or update the ConfigMap
+          oc create configmap rhtpa-ingress-ca -n {{ .Values.rhtpa.namespace }} \
+            --from-file=ca.crt=/tmp/ca.crt \
+            --dry-run=client -o yaml | oc apply -f -
+          
+          echo "Ingress CA certificate extracted and ConfigMap created"
+{{- end }}
+

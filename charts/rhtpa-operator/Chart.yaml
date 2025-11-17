@@ -1,0 +1,18 @@
+apiVersion: v2
+name: rhtpa-operator
+description: Red Hat Trusted Profile Analyzer (RHTPA) using the Operator for Layer 1 Zero Trust Architecture
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - trusted-profile-analyzer
+  - rhtpa
+  - guac
+  - sbom
+  - supply-chain-security
+  - zero-trust
+  - operator
+maintainers:
+  - name: Zero Trust Validated Patterns Team
+    email: ztvp-arch-group@redhat.com
+

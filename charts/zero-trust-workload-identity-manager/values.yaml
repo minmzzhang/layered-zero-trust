@@ -11,6 +11,7 @@ spire:
   clusterName: "cluster"
 
   agent:
+    enabled: true
     nodeAttestor:
       k8sPSATEnabled: "true"
     workloadAttestors:
@@ -32,6 +33,7 @@ spire:
       port: 443
 
   server:
+    enabled: true  # Set to false on spoke clusters (agent-only mode)
     ca:
       commonName: redhat.com
       country: US

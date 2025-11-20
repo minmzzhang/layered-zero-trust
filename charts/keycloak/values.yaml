@@ -34,6 +34,14 @@ keycloak:
       - +
       attributes:
         oauth2.device.authorization.grant.enabled: 'true'
+      protocolMappers:
+      - name: audience-mapper
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        config:
+          included.client.audience: trusted-artifact-signer
+          access.token.claim: 'true'
+          id.token.claim: 'false'
     displayName: ZTVP Realm
     enabled: true
     realm: ztvp

@@ -1,0 +1,347 @@
+{{- if .Values.rhtpa.syft.enabled }}
+{{- if .Values.rhtpa.imageDiscovery.enabled }}
+---
+# ServiceAccount for cross-cluster image discovery
+# Note: Image discovery only deploys when SYFT scanner is also enabled
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: image-discovery
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+---
+# Role to list pods and update ConfigMaps
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: image-discovery
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: image-discovery
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: image-discovery
+subjects:
+- kind: ServiceAccount
+  name: image-discovery
+  namespace: {{ .Values.rhtpa.namespace }}
+---
+# Job to discover production images
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: discover-production-images
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: image-discovery
+        component: production-scanner
+    spec:
+      serviceAccountName: image-discovery
+      restartPolicy: OnFailure
+      # Enable process namespace sharing for sidecar management
+      shareProcessNamespace: true
+      initContainers:
+      # Wait for SPIFFE workload API
+      - name: wait-for-spire
+        image: {{ .Values.rhtpa.imageDiscovery.image | default "registry.redhat.io/openshift4/ose-cli:latest" }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "Waiting for SPIFFE workload API..."
+          until [ -S /spiffe-workload-api/spire-agent.sock ]; do
+            echo "  Waiting for SPIFFE socket..."
+            sleep 2
+          done
+          echo "SPIFFE workload API is ready"
+        volumeMounts:
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+      containers:
+      - name: discover
+        image: {{ .Values.rhtpa.imageDiscovery.image | default "registry.redhat.io/openshift4/ose-cli:latest" }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          #!/bin/bash
+          set -e
+          
+          echo "=========================================="
+          echo "Production Image Discovery"
+          echo "=========================================="
+          echo "Target cluster API: ${PROD_CLUSTER_URL}"
+          echo "Target namespaces: ${PRODUCTION_NAMESPACES}"
+          echo "Vault path: ${VAULT_KUBECONFIG_PATH}"
+          echo ""
+          
+          # Wait for SPIFFE JWT token
+          echo "Waiting for SPIFFE JWT token..."
+          MAX_RETRIES=60
+          RETRY_COUNT=0
+          while [ ! -f "/run/secrets/spiffe/jwt.token" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "  Waiting for JWT token... ($RETRY_COUNT/$MAX_RETRIES)"
+            sleep 1
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+          done
+          
+          if [ ! -f "/run/secrets/spiffe/jwt.token" ]; then
+            echo "ERROR: SPIFFE JWT token not found after ${MAX_RETRIES} seconds"
+            exit 1
+          fi
+          
+          JWT_TOKEN=$(cat /run/secrets/spiffe/jwt.token)
+          echo "JWT token obtained"
+          
+          # Authenticate with Vault using SPIFFE JWT
+          echo ""
+          echo "Authenticating with Vault..."
+          VAULT_RESPONSE=$(curl -sk -X POST "${VAULT_ADDR}/v1/auth/jwt/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"role\":\"${VAULT_ROLE}\",\"jwt\":\"${JWT_TOKEN}\"}")
+          
+          if echo "$VAULT_RESPONSE" | jq -e '.auth.client_token' >/dev/null 2>&1; then
+            VAULT_TOKEN=$(echo "$VAULT_RESPONSE" | jq -r '.auth.client_token')
+            echo "Successfully authenticated with Vault"
+          else
+            echo "ERROR: Failed to authenticate with Vault"
+            echo "Response: $VAULT_RESPONSE"
+            exit 1
+          fi
+          
+          # Retrieve production cluster credentials from Vault
+          echo ""
+          echo "Retrieving production cluster credentials from Vault..."
+          KUBECONFIG_DATA=$(curl -sk -X GET "${VAULT_ADDR}/v1/${VAULT_KUBECONFIG_PATH}" \
+            -H "X-Vault-Token: ${VAULT_TOKEN}")
+          
+          if echo "$KUBECONFIG_DATA" | jq -e '.data.data' >/dev/null 2>&1; then
+            # Extract token from kubeconfig (ACM stores kubeconfig in Vault)
+            # The kubeconfig is base64 encoded in the Vault secret
+            KUBECONFIG_CONTENT=$(echo "$KUBECONFIG_DATA" | jq -r '.data.data.value // .data.data.kubeconfig // .data.data.token')
+            
+            if [ -z "$KUBECONFIG_CONTENT" ] || [ "$KUBECONFIG_CONTENT" = "null" ]; then
+              echo "ERROR: Failed to extract credentials from Vault"
+              echo "Available keys:"
+              echo "$KUBECONFIG_DATA" | jq -r '.data.data | keys[]'
+              exit 1
+            fi
+            
+            # Try to decode if base64 encoded
+            if echo "$KUBECONFIG_CONTENT" | base64 -d >/dev/null 2>&1; then
+              KUBECONFIG_CONTENT=$(echo "$KUBECONFIG_CONTENT" | base64 -d)
+            fi
+            
+            # Extract token from kubeconfig or use directly as token
+            if echo "$KUBECONFIG_CONTENT" | grep -q "token:"; then
+              # It's a kubeconfig, extract the token
+              PROD_CLUSTER_TOKEN=$(echo "$KUBECONFIG_CONTENT" | grep "token:" | head -1 | awk '{print $2}')
+              echo "Extracted token from kubeconfig"
+            else
+              # It's a direct token
+              PROD_CLUSTER_TOKEN="$KUBECONFIG_CONTENT"
+              echo "Using token directly from Vault"
+            fi
+            
+            if [ -z "$PROD_CLUSTER_TOKEN" ]; then
+              echo "ERROR: Failed to extract token"
+              exit 1
+            fi
+            
+            echo "Production cluster credentials retrieved successfully"
+          else
+            echo "ERROR: Failed to retrieve credentials from Vault"
+            echo "Response: $KUBECONFIG_DATA"
+            exit 1
+          fi
+          
+          # Login to production cluster
+          echo ""
+          echo "Authenticating to production cluster..."
+          oc login "${PROD_CLUSTER_URL}" --token="${PROD_CLUSTER_TOKEN}" --insecure-skip-tls-verify=true
+          
+          # Discover images from production namespaces
+          echo ""
+          echo "Discovering images from production..."
+          ALL_IMAGES=""
+          
+          for ns in ${PRODUCTION_NAMESPACES//,/ }; do
+            echo "  Checking namespace: $ns"
+            NS_IMAGES=$(oc get pods -n "$ns" -o jsonpath='{range .items[*]}{.spec.containers[*].image}{"\n"}{.spec.initContainers[*].image}{"\n"}{end}' 2>/dev/null || echo "")
+            
+            if [ -n "$NS_IMAGES" ]; then
+              COUNT=$(echo "$NS_IMAGES" | wc -l)
+              echo "    Found $COUNT container images"
+              ALL_IMAGES="${ALL_IMAGES}${NS_IMAGES}\n"
+            else
+              echo "    No pods found or access denied"
+            fi
+          done
+          
+          # Process and filter images
+          echo ""
+          echo "Processing image list..."
+          UNIQUE_IMAGES=$(echo -e "$ALL_IMAGES" | \
+            grep -v "^$" | \
+            sort -u | \
+            grep -v "sha256:" || true)
+          
+          # Apply filters if configured
+          {{- if .Values.rhtpa.imageDiscovery.filters.exclude }}
+          echo "  Applying exclusion filters..."
+          {{- range .Values.rhtpa.imageDiscovery.filters.exclude }}
+          UNIQUE_IMAGES=$(echo "$UNIQUE_IMAGES" | grep -v "{{ . }}" || true)
+          {{- end }}
+          {{- end }}
+          
+          {{- if .Values.rhtpa.imageDiscovery.filters.include }}
+          echo "  Applying inclusion filters..."
+          FILTERED_IMAGES=""
+          {{- range .Values.rhtpa.imageDiscovery.filters.include }}
+          FILTERED_IMAGES="${FILTERED_IMAGES}$(echo "$UNIQUE_IMAGES" | grep "{{ . }}" || true)\n"
+          {{- end }}
+          UNIQUE_IMAGES=$(echo -e "$FILTERED_IMAGES" | grep -v "^$" | sort -u)
+          {{- end }}
+          
+          IMAGE_COUNT=$(echo "$UNIQUE_IMAGES" | grep -v "^$" | wc -l)
+          echo "  Total unique images after filtering: $IMAGE_COUNT"
+          
+          if [ $IMAGE_COUNT -eq 0 ]; then
+            echo ""
+            echo "WARNING: No images found. Check namespace names and permissions."
+            exit 1
+          fi
+          
+          # Create ConfigMap with discovered images
+          echo ""
+          echo "Creating ConfigMap with discovered images..."
+          
+          # Login back to dev cluster
+          if [ -n "${PROD_CLUSTER_TOKEN}" ]; then
+            oc login "${DEV_CLUSTER_URL}" --token="${DEV_CLUSTER_TOKEN}" --insecure-skip-tls-verify=true
+          fi
+          
+          cat > /tmp/production-images.yaml <<EOFCM
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: production-images
+            namespace: {{ .Values.rhtpa.namespace }}
+            labels:
+              app: syft-scanner
+              component: image-discovery
+              last-updated: "$(date +%Y%m%d-%H%M%S)"
+            annotations:
+              discovered-at: "$(date -Iseconds)"
+              source-cluster: "${PROD_CLUSTER_URL}"
+              source-namespaces: "${PRODUCTION_NAMESPACES}"
+              image-count: "$IMAGE_COUNT"
+          data:
+            images.txt: |
+          $(echo "$UNIQUE_IMAGES" | sed 's/^/      /')
+            
+            images.json: |
+              {
+                "images": [
+          $(echo "$UNIQUE_IMAGES" | sed 's/.*/        "&",/' | sed '$ s/,$//')
+                ],
+                "metadata": {
+                  "discovered_at": "$(date -Iseconds)",
+                  "source_cluster": "${PROD_CLUSTER_URL}",
+                  "source_namespaces": "${PRODUCTION_NAMESPACES}",
+                  "total_count": $IMAGE_COUNT
+                }
+              }
+          EOFCM
+          
+          oc apply -f /tmp/production-images.yaml
+          
+          echo ""
+          echo "=========================================="
+          echo "Discovery Complete!"
+          echo "=========================================="
+          echo "Images discovered: $IMAGE_COUNT"
+          echo "ConfigMap created: production-images"
+          echo ""
+          echo "Discovered images:"
+          echo "$UNIQUE_IMAGES"
+          echo ""
+          echo "Next: Run SYFT scanner to generate SBOMs"
+          
+          # Stop SPIFFE helper sidecar
+          echo "Stopping spiffe-helper sidecar..."
+          killall spiffe-helper 2>/dev/null || true
+          sleep 2
+        env:
+        - name: PROD_CLUSTER_URL
+          value: {{ .Values.rhtpa.imageDiscovery.productionCluster.url | quote }}
+        - name: PRODUCTION_NAMESPACES
+          value: {{ .Values.rhtpa.imageDiscovery.productionCluster.namespaces | join "," | quote }}
+        - name: VAULT_ADDR
+          value: {{ .Values.rhtpa.imageDiscovery.vault.url | default "https://vault.vault.svc.cluster.local:8200" | quote }}
+        - name: VAULT_ROLE
+          value: {{ .Values.rhtpa.imageDiscovery.vault.role | default "image-discovery" | quote }}
+        - name: VAULT_KUBECONFIG_PATH
+          value: {{ .Values.rhtpa.imageDiscovery.productionCluster.kubeconfigVaultPath | quote }}
+        - name: DEV_CLUSTER_URL
+          value: {{ .Values.rhtpa.imageDiscovery.devCluster.url | default "https://kubernetes.default.svc" | quote }}
+        volumeMounts:
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+        - name: spiffe-jwt
+          mountPath: /run/secrets/spiffe
+      # SPIFFE Helper sidecar for JWT token generation
+      - name: spiffe-helper
+        image: ghcr.io/spiffe/spiffe-helper:0.8.0
+        args:
+        - -config
+        - /etc/spiffe-helper/spiffe-helper.conf
+        volumeMounts:
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+        - name: spiffe-jwt
+          mountPath: /run/secrets/spiffe
+        - name: spiffe-helper-config
+          mountPath: /etc/spiffe-helper
+          readOnly: true
+      volumes:
+      - name: spiffe-workload-api
+        csi:
+          driver: csi.spiffe.io
+          readOnly: true
+      - name: spiffe-jwt
+        emptyDir: {}
+      - name: spiffe-helper-config
+        configMap:
+          name: image-discovery-spiffe-helper-config
+{{- end }}
+{{- end }}
+

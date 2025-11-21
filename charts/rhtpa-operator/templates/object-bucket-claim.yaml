@@ -1,0 +1,14 @@
+{{- if .Values.rhtpa.objectStorage.enabled }}
+---
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }}
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"  # Create OBC after NooBaa system is ready
+spec:
+  generateBucketName: {{ .Values.rhtpa.objectStorage.objectBucketClaim.bucketName }}
+  storageClassName: {{ .Values.rhtpa.objectStorage.objectBucketClaim.storageClass }}
+{{- end }}
+

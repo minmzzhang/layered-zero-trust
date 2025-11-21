@@ -1,0 +1,312 @@
+{{- if .Values.rhtpa.syft.enabled }}
+---
+# SYFT SBOM Generator Script
+# Generates SBOMs using SYFT and submits to RHTPA using SPIFFE JWT authentication
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-sbom-generator-script
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+data:
+  generate-sboms.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "SYFT SBOM Generator for ZTVP Applications"
+    echo "=========================================="
+    echo "Using SPIFFE JWT authentication with Vault"
+    echo ""
+    
+    # Configuration
+    VAULT_ADDR="{{ .Values.rhtpa.zeroTrust.vault.url }}"
+    VAULT_ROLE="{{ .Values.rhtpa.syft.vault.role }}"
+    JWT_PATH="/run/secrets/spiffe/jwt.token"
+    OUTPUT_DIR="/tmp/sboms"
+    SBOM_FORMAT="{{ .Values.rhtpa.syft.format }}"
+    
+    mkdir -p "$OUTPUT_DIR"
+    
+    # Function to authenticate with Vault using SPIFFE JWT
+    authenticate_with_vault() {
+      echo "Authenticating with Vault using SPIFFE JWT..."
+      
+      # Wait for JWT token to be generated
+      for i in {1..30}; do
+        if [ -f "$JWT_PATH" ] && [ -s "$JWT_PATH" ]; then
+          echo "JWT token found"
+          break
+        fi
+        echo "Waiting for JWT token... ($i/30)"
+        sleep 2
+      done
+      
+      if [ ! -f "$JWT_PATH" ] || [ ! -s "$JWT_PATH" ]; then
+        echo "ERROR: JWT token not found or empty at $JWT_PATH"
+        exit 1
+      fi
+      
+      # Read JWT token
+      JWT_TOKEN=$(cat "$JWT_PATH")
+      
+      # Authenticate with Vault
+      VAULT_RESPONSE=$(curl -sk -X POST "$VAULT_ADDR/v1/auth/jwt/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"role\":\"$VAULT_ROLE\",\"jwt\":\"$JWT_TOKEN\"}")
+      
+      if echo "$VAULT_RESPONSE" | jq -e '.auth.client_token' >/dev/null 2>&1; then
+        VAULT_TOKEN=$(echo "$VAULT_RESPONSE" | jq -r '.auth.client_token')
+        echo "Successfully authenticated with Vault"
+        echo "Token lease duration: $(echo "$VAULT_RESPONSE" | jq -r '.auth.lease_duration') seconds"
+        export VAULT_TOKEN
+        return 0
+      else
+        echo "ERROR: Failed to authenticate with Vault"
+        echo "Response: $VAULT_RESPONSE"
+        return 1
+      fi
+    }
+    
+    # Function to upload file to RHTPA API
+    upload_to_api() {
+      local file_path=$1
+      
+      echo "    Uploading to RHTPA API: $RHTPA_API_URL"
+      export SBOM_FILE="$file_path"
+      
+      python3 /scripts/rhtpa-api-upload.py
+      local upload_result=$?
+      
+      if [ $upload_result -eq 0 ]; then
+        return 0
+      else
+        echo "    WARNING: API upload failed"
+        return 1
+      fi
+    }
+
+    # Function to generate and upload SBOM
+    generate_and_upload_sbom() {
+      local image=$1
+      local image_name=$(echo "$image" | sed 's|.*/||' | sed 's|:|-|' | sed 's|@|-|' | sed 's/[^a-zA-Z0-9_-]/-/g')
+      local sbom_file="$OUTPUT_DIR/${image_name}-sbom.${SBOM_FORMAT}.json"
+      
+      echo ""
+      echo "Processing: $image"
+      echo "----------------------------------------"
+      
+      # Generate SBOM
+      echo "  Step 1: Generating SBOM with SYFT..."
+      if syft registry:${image} -o ${SBOM_FORMAT} > "$sbom_file" 2>/tmp/syft-error.log; then
+        echo "  SUCCESS: SBOM generated: $sbom_file"
+        
+        # Get package count
+        PACKAGE_COUNT=$(cat "$sbom_file" | jq '.packages | length' 2>/dev/null || echo "unknown")
+        echo "  Packages found: $PACKAGE_COUNT"
+        
+        # Get SBOM size
+        SBOM_SIZE=$(ls -lh "$sbom_file" | awk '{print $5}')
+        echo "  SBOM size: $SBOM_SIZE"
+      else
+        echo "  ERROR: Failed to generate SBOM for $image"
+        cat /tmp/syft-error.log
+        return 1
+      fi
+      
+      # Upload to API (Priority)
+      if [ -n "$RHTPA_API_URL" ] && [ -n "$OIDC_CLIENT_SECRET" ]; then
+        echo "  Step 2: Uploading to RHTPA API..."
+        if upload_to_api "$sbom_file"; then
+           echo "  SUCCESS: SBOM uploaded to RHTPA API"
+           echo "----------------------------------------"
+           return 0
+        else
+           echo "  WARNING: API upload failed, falling back to S3..."
+        fi
+      fi
+
+      # Upload to S3 Storage (Fallback)
+      echo "  Step 2: Uploading to S3..."
+      local timestamp=$(date +%Y%m%d-%H%M%S)
+      local s3_key="${image_name}-${timestamp}.${SBOM_FORMAT}.json"
+      
+      if [ -n "$S3_BUCKET" ]; then
+
+        # Export variables for Python script
+        export UPLOAD_FILE_PATH="$sbom_file"
+        export UPLOAD_S3_KEY="$s3_key"
+        
+        if upload_to_s3 "$sbom_file" "$s3_key"; then
+          echo "  SUCCESS: SBOM uploaded to S3 and available in RHTPA"
+        else
+          echo "  WARNING: S3 upload failed, SBOM saved locally only: $sbom_file"
+        fi
+      else
+        echo "  NOTE: S3 not configured, SBOM saved locally: $sbom_file"
+      fi
+      
+      echo "----------------------------------------"
+      return 0
+    }
+    
+    # Function to verify S3 credentials from environment
+    get_s3_credentials() {
+      echo "Verifying S3 credentials from environment..."
+      
+      # S3 credentials are injected as environment variables from the job
+      # S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET, S3_ENDPOINT
+      
+      # Set default endpoint if not provided
+      if [ -z "$S3_ENDPOINT" ]; then
+        S3_ENDPOINT="http://s3.openshift-storage.svc"
+      fi
+      
+      # Add https:// or http:// prefix if not present
+      if [[ ! "$S3_ENDPOINT" =~ ^https?:// ]]; then
+        S3_ENDPOINT="https://$S3_ENDPOINT"
+      fi
+      
+      if [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ] || [ -z "$S3_BUCKET" ]; then
+        echo "WARNING: S3 credentials not available in environment"
+        echo "  S3_ACCESS_KEY: ${S3_ACCESS_KEY:+set}"
+        echo "  S3_SECRET_KEY: ${S3_SECRET_KEY:+set}"
+        echo "  S3_BUCKET: ${S3_BUCKET:-not set}"
+        return 1
+      fi
+      
+      echo "S3 Bucket: $S3_BUCKET"
+      echo "S3 Endpoint: $S3_ENDPOINT"
+      export S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET S3_ENDPOINT
+      return 0
+    }
+    
+    # Function to upload file to S3 using Python/boto3
+    upload_to_s3() {
+      local file_path=$1
+      local s3_key=$2
+      
+      echo "    Uploading: s3://$S3_BUCKET/sboms/$s3_key"
+      
+      # Run the Python S3 upload script (mounted from files directory)
+      python3 /scripts/s3-upload.py
+      local upload_result=$?
+      
+      if [ $upload_result -eq 0 ]; then
+        return 0
+      else
+        echo "    WARNING: S3 upload failed"
+        return 1
+      fi
+    }
+    
+    # Main execution
+    echo "Step 1: Vault Authentication"
+    echo "----------------------------"
+    if ! authenticate_with_vault; then
+      echo ""
+      echo "FATAL: Cannot proceed without Vault authentication"
+      exit 1
+    fi
+    
+    echo ""
+    echo "Step 2: S3 Storage Configuration"
+    echo "---------------------------------"
+    if ! get_s3_credentials; then
+      echo ""
+      echo "WARNING: S3 credentials not available, SBOMs will be saved locally only"
+    fi
+    
+    echo ""
+    echo "Step 3: SBOM Generation and Upload"
+    echo "-----------------------------------"
+    
+    # List of images to scan
+{{- if .Values.rhtpa.imageDiscovery.enabled }}
+    # Load images from discovery ConfigMap
+    echo "Loading images from production discovery ConfigMap..."
+    if oc get configmap production-images -n {{ .Values.rhtpa.namespace }} >/dev/null 2>&1; then
+      mapfile -t IMAGES < <(oc get configmap production-images -n {{ .Values.rhtpa.namespace }} -o jsonpath='{.data.images\.txt}' | grep -v "^$")
+      echo "Loaded ${#IMAGES[@]} images from ConfigMap"
+    else
+      echo "WARNING: ConfigMap 'production-images' not found"
+      echo "Run the image-discovery job first or configure static images"
+      IMAGES=()
+    fi
+{{- else }}
+    # Use static image list from values
+    IMAGES=(
+{{- range .Values.rhtpa.syft.images }}
+      "{{ . }}"
+{{- end }}
+    )
+{{- end }}
+    
+    if [ ${#IMAGES[@]} -eq 0 ]; then
+      echo "No images configured for scanning"
+{{- if .Values.rhtpa.imageDiscovery.enabled }}
+      echo "Hint: Run 'oc create job discover-now --from=job/discover-production-images' to discover images"
+{{- end }}
+      exit 0
+    fi
+    
+    echo "Images to scan: ${#IMAGES[@]}"
+    echo ""
+    
+    # Process all images
+    SUCCESS_COUNT=0
+    FAIL_COUNT=0
+    
+    echo "DEBUG: Starting to process ${#IMAGES[@]} images..."
+    
+    for image in "${IMAGES[@]}"; do
+      echo "DEBUG: Processing image: $image"
+      if generate_and_upload_sbom "$image"; then
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+        echo "DEBUG: Image successful, SUCCESS_COUNT=$SUCCESS_COUNT"
+      else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        echo "DEBUG: Image failed, FAIL_COUNT=$FAIL_COUNT"
+      fi
+    done
+    
+    echo "DEBUG: Finished processing all images"
+    echo "DEBUG: SUCCESS_COUNT=$SUCCESS_COUNT, FAIL_COUNT=$FAIL_COUNT"
+    
+    # Summary
+    echo ""
+    echo "=========================================="
+    echo "SBOM Generation Summary"
+    echo "=========================================="
+    echo "Total images: ${#IMAGES[@]}"
+    echo "Successful: $SUCCESS_COUNT"
+    echo "Failed: $FAIL_COUNT"
+    echo ""
+    echo "SBOMs stored in: $OUTPUT_DIR"
+    ls -lh "$OUTPUT_DIR" 2>/dev/null || echo "No SBOMs generated"
+    echo ""
+    
+    if [ $FAIL_COUNT -gt 0 ]; then
+      echo "ERROR: Some SBOMs failed to generate or submit"
+      echo "Exiting with error code 1"
+      exit 1
+    fi
+    
+    echo "SUCCESS: All SBOMs generated and submitted successfully!"
+    echo "Exiting with success code 0"
+    
+    # Signal completion and terminate sidecar
+    # Create a marker file to indicate successful completion
+    touch /tmp/sbom-generation-complete
+    
+    # Kill the spiffe-helper sidecar to allow the pod to terminate
+    echo "Stopping spiffe-helper sidecar..."
+    # Use killall (works with shared process namespace, no need for ps)
+    killall spiffe-helper 2>/dev/null || true
+    echo "Sidecar termination signal sent"
+    
+    # Keep container alive briefly to allow log collection
+    sleep 2
+    exit 0
+{{- end }}
+

@@ -13,18 +13,17 @@ rhtas:
   namespace: trusted-artifact-signer
   
   # Zero Trust Integration
-  # Note: Both SPIFFE and Keycloak issuers can be enabled simultaneously
+  # Note: Both SPIFFE and Email issuers can be enabled simultaneously
   zeroTrust:
     spire:
       enabled: true  # Enable SPIFFE issuer for workload identity
       trustDomain: "apps.example.com"
       # IMPORTANT: This URL must match the 'iss' claim in JWT-SVIDs issued by SPIRE
       # SPIRE uses the external route URL (apps.example.com), not the internal service URL
-      oidcDiscoveryUrl: "https://spire-spiffe-oidc-discovery-provider.apps.example.com"
-    keycloak:
-      enabled: true  # Enable Keycloak issuer for user/email authentication
-      url: "https://keycloak.apps.example.com"  # MUST be public route URL (overridden in values-hub.yaml)
-      realm: "ztvp"
+      issuer: "https://spire-spiffe-oidc-discovery-provider.apps.example.com"
+    email:
+      enabled: true  # Enable Email issuer for user authentication
+      issuer: "https://keycloak.apps.example.com/realms/ztvp"  # MUST be public route URL (overridden in values-hub.yaml)
   
   # Fulcio-specific configuration
   fulcio:
@@ -34,7 +33,7 @@ rhtas:
       spiffe:
         clientID: "sigstore"
         type: "spiffe"
-      keycloak:
+      email:
         clientID: "trusted-artifact-signer"
         type: "email"
 

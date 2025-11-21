@@ -1,3 +1,4 @@
+{{- if .Values.spire.server.enabled }}
 apiVersion: operator.openshift.io/v1alpha1
 kind: SpireServer
 metadata:
@@ -18,3 +19,4 @@ spec:
     maxIdleConns: {{ .Values.spire.server.datastore.maxIdleConns }}
     connMaxLifetime: {{ .Values.spire.server.datastore.connMaxLifetime }}
   jwtIssuer: {{ include "zero-trust-workload-identity-manager.jwtIssuer" . }}
+{{- end }}

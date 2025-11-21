@@ -11,10 +11,26 @@ clusterGroup:
     - golang-external-secrets
     - policies
     - openshift-pipelines
+    - trusted-profile-analyzer  # For SYFT scanner
+    - zero-trust-workload-identity-manager:
+        operatorGroup: true
+        targetNamespace: zero-trust-workload-identity-manager
+        annotations:
+          argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
+    - spire-system  # SPIRE agent for SPIFFE authentication to hub Vault
   subscriptions:
     openshift-pipelines:
       name: openshift-pipelines-operator-rh
       namespace: openshift-operators
+      channel: latest
+      catalogSource: redhat-operators
+    zero-trust-workload-identity-manager:
+      name: openshift-zero-trust-workload-identity-manager
+      namespace: zero-trust-workload-identity-manager
+      channel: tech-preview-v0.2
+      catalogSource: redhat-marketplace
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Install before ZTWIM application (wave 5)
   projects:
     - dev
     - eso
@@ -25,5 +41,84 @@ clusterGroup:
       project: eso
       chart: golang-external-secrets
       chartVersion: 0.1.*
+      annotations:
+        argocd.argoproj.io/sync-wave: "1"  # Create after AppProjects (wave 0)
+    # SPIRE Agent for Zero Trust workload identity
+    # Federates with hub SPIRE server for SPIFFE authentication to hub Vault
+    # Required for automated credential retrieval in image-discovery job
+    zero-trust-workload-identity-manager:
+      name: zero-trust-workload-identity-manager
+      namespace: spire-system
+      project: dev
+      path: charts/zero-trust-workload-identity-manager
+      annotations:
+        argocd.argoproj.io/sync-wave: "5"
+      overrides:
+        - name: spire.server.enabled
+          value: false
+        - name: spire.agent.enabled
+          value: true
+        - name: spire.clusterName
+          value: dev
+        # Federation with hub SPIRE server
+        - name: spire.agent.federation.enabled
+          value: true
+        - name: spire.agent.federation.bundleEndpoint
+          value: "https://spire-server.apps.{{ $.Values.global.hubClusterDomain }}/bundle"
+    # SYFT SBOM Scanner - runs on dev cluster to scan production
+    # Submits SBOMs to hub RHTPA instance
+    trusted-profile-analyzer:
+      name: trusted-profile-analyzer
+      namespace: trusted-profile-analyzer
+      project: dev
+      path: charts/rhtpa-operator
+      annotations:
+        argocd.argoproj.io/sync-wave: "10"
+      overrides:
+        # Deploy SYFT scanner only (NOT full RHTPA stack)
+        # SYFT now deploys independently without requiring rhtpa.enabled
+        - name: rhtpa.enabled
+          value: false  # Don't deploy RHTPA components
+        - name: rhtpa.syft.enabled
+          value: true   # Enable SYFT scanner
+        - name: rhtpa.syft.cronjob.enabled
+          value: true   # Enable automated daily scans
+        - name: rhtpa.syft.cronjob.schedule
+          value: "0 2 * * *"  # Daily at 2 AM
+        # RHTPA API URL - point to hub cluster's RHTPA service
+        # NOTE: Due to RHTPA operator bug, actual route is "servertrustify" not "trustify"
+        - name: rhtpa.syft.apiUrl
+          value: "https://servertrustify.apps.{{ $.Values.global.hubClusterDomain }}"
+        
+        # Enable production image discovery
+        - name: rhtpa.imageDiscovery.enabled
+          value: true
+        
+        # Configure production cluster (ACM managed cluster: ztvp-prod)
+        # Credentials automatically retrieved from Vault via SPIFFE authentication
+        - name: rhtpa.imageDiscovery.productionCluster.url
+          value: "https://api.ztvp-prod.minzhang.edge-sro.rhecoeng.com:6443"
+        - name: rhtpa.imageDiscovery.productionCluster.namespaces[0]
+          value: "qtodo-production"  # Primary production application
+        - name: rhtpa.imageDiscovery.productionCluster.namespaces[1]
+          value: "default"
+        - name: rhtpa.imageDiscovery.productionCluster.namespaces[2]
+          value: "apps"
+        # Vault path where ACM stores ztvp-prod kubeconfig
+        # From values-hub.yaml: kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-prod
+        - name: rhtpa.imageDiscovery.productionCluster.kubeconfigVaultPath
+          value: "secret/data/hub/kubeconfig-ztvp-prod"
+        
+        # Vault configuration (uses hub's Vault)
+        - name: rhtpa.imageDiscovery.vault.url
+          value: "https://vault.apps.{{ $.Values.global.hubClusterDomain }}"
+        - name: rhtpa.imageDiscovery.vault.role
+          value: "image-discovery"
+        
+        # Configure RHTPA API URL on hub for SBOM upload
+        - name: rhtpa.zeroTrust.keycloak.url
+          value: "https://keycloak.apps.{{ $.Values.global.hubClusterDomain }}"
+        - name: rhtpa.zeroTrust.keycloak.realm
+          value: "ztvp"
   sharedValueFiles:
     - '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml'

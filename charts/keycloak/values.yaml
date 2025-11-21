@@ -42,6 +42,16 @@ keycloak:
           included.client.audience: trusted-artifact-signer
           access.token.claim: 'true'
           id.token.claim: 'false'
+    - clientId: oidc-cli
+      enabled: true
+      name: RHTPA CLI Client
+      protocol: openid-connect
+      publicClient: false
+      secret: ${OIDC_CLI_SECRET}
+      directAccessGrantsEnabled: true
+      standardFlowEnabled: true
+      implicitFlowEnabled: false
+      serviceAccountsEnabled: true
     displayName: ZTVP Realm
     enabled: true
     realm: ztvp
@@ -52,6 +62,10 @@ keycloak:
         name: qtodo-admin
       - description: Read-only access
         name: viewer
+      - description: RHTPA SBOM Creator
+        name: create:sbom
+      - description: RHTPA Document Creator
+        name: create:document
     users:
     - createdTimestamp: 1
       credentials:
@@ -96,6 +110,21 @@ keycloak:
       realmRoles:
       - viewer
       username: rhtas-user
+    - createdTimestamp: 1
+      credentials:
+      - temporary: false
+        type: password
+        value: ${RHTPA_USER_PASSWORD}
+      email: rhtpa-user@example.com
+      emailVerified: true
+      enabled: true
+      firstName: RHTPA
+      lastName: User
+      realmRoles:
+      - viewer
+      - create:sbom
+      - create:document
+      username: rhtpa-user
   ingress:
     enabled: true
     service: keycloak-service-trusted

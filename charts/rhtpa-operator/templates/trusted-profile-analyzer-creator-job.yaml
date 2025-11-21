@@ -1,0 +1,164 @@
+{{- if .Values.rhtpa.enabled }}
+---
+# ServiceAccount for RHTPA
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rhtpa
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+---
+# Role for creating TrustedProfileAnalyzer CR
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "create", "update", "patch"]
+- apiGroups: ["rhtpa.io"]
+  resources: ["trustedprofileanalyzers"]
+  verbs: ["get", "create", "patch", "update"]
+- apiGroups: ["objectbucket.io"]
+  resources: ["objectbucketclaims"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rhtpa-cr-creator
+subjects:
+- kind: ServiceAccount
+  name: rhtpa
+  namespace: {{ .Values.rhtpa.namespace }}
+---
+# Job to create TrustedProfileAnalyzer CR with real credentials
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"  # After database and storage are ready
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      name: rhtpa-cr-creator
+    spec:
+      serviceAccountName: rhtpa
+      restartPolicy: OnFailure
+      shareProcessNamespace: true  # Allow containers to see each other's processes
+      
+      # Init container to wait for database to be ready
+      initContainers:
+      - name: wait-for-database
+        image: registry.redhat.io/ubi9/ubi-minimal:latest
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for database service to be available..."
+          for i in $(seq 1 60); do
+            if getent hosts rhtpa-db.{{ .Values.rhtpa.namespace }}.svc.cluster.local >/dev/null 2>&1; then
+              echo "Database service DNS resolved"
+              # Wait additional time for PostgreSQL to be fully ready
+              echo "Waiting 30 seconds for PostgreSQL to be ready..."
+              sleep 30
+              echo "Database should be ready now"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 5
+          done
+          echo "ERROR: Database service not found after 5 minutes"
+          exit 1
+      
+      volumes:
+      - name: script
+        configMap:
+          name: rhtpa-cr-creator-script
+          defaultMode: 0755
+      - name: spiffe-workload-api
+        csi:
+          driver: "csi.spiffe.io"
+          readOnly: true
+      - name: spiffe-vault-client
+        configMap:
+          name: spiffe-vault-client
+          defaultMode: 0755
+      - name: spiffe-token
+        emptyDir: {}
+      - name: spiffe-helper-config
+        configMap:
+          name: spiffe-helper-config
+      containers:
+      # SPIFFE helper sidecar to generate JWT token
+      - name: spiffe-helper
+        image: ghcr.io/spiffe/spiffe-helper:nightly
+        args:
+        - -config
+        - /etc/spiffe-helper/config.hcl
+        volumeMounts:
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+        - name: spiffe-token
+          mountPath: /run/secrets/spiffe
+        - name: spiffe-helper-config
+          mountPath: /etc/spiffe-helper
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 5"]
+      # Main container
+      - name: create-cr
+        image: registry.redhat.io/openshift4/ose-cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          /scripts/create-cr.sh
+          # Signal completion and give time for cleanup
+          sleep 3
+          # Kill spiffe-helper sidecar to allow Job to complete
+          killall spiffe-helper 2>/dev/null || true
+        env:
+        - name: VAULT_ADDR
+          value: {{ .Values.rhtpa.zeroTrust.vault.url | quote }}
+        - name: SPIFFE_ENDPOINT_SOCKET
+          value: "unix:///spiffe-workload-api/spire-agent.sock"
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+        - name: spiffe-workload-api
+          mountPath: /spiffe-workload-api
+          readOnly: true
+        - name: spiffe-vault-client
+          mountPath: /usr/local/bin/rhtpa-spiffe-vault-client.py
+          subPath: rhtpa-spiffe-vault-client.py
+        - name: spiffe-token
+          mountPath: /run/secrets/spiffe
+          readOnly: true
+{{- end }}
+

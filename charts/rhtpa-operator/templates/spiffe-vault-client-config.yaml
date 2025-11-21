@@ -1,0 +1,13 @@
+{{- if .Values.rhtpa.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spiffe-vault-client
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+data:
+  rhtpa-spiffe-vault-client.py: |
+{{ .Files.Get "files/rhtpa-spiffe-vault-client.py" | indent 4 }}
+{{- end }}

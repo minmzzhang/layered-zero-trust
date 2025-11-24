@@ -3,6 +3,28 @@ global:
     useCSV: False
     syncPolicy: Automatic
     installPlanApproval: Automatic
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+      - SkipDryRunOnMissingResource=true
+      - ApplyOutOfSyncOnly=true
+    ignoreDifferences:
+      - group: ""
+        kind: Namespace
+        jsonPointers:
+          - /metadata
+      - group: ""
+        kind: ConfigMap
+        jsonPointers:
+          - /metadata
+      - group: operators.coreos.com
+        kind: OperatorGroup
+        jsonPointers:
+          - /metadata
+      - group: operators.coreos.com
+        kind: Subscription
+        jsonPointers:
+          - /status
 
 clusterGroup:
   name: devel

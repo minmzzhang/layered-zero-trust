@@ -1,0 +1,75 @@
+{{- range .Values.clusterGroup.managedClusterGroups }}
+{{- $group := . }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: spire-bundle-{{ $group.name }}-policy
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: spire-bundle-{{ $group.name }}-config
+        spec:
+          remediationAction: enforce
+          severity: medium
+          namespaceSelector:
+            include:
+              - default
+          object-templates:
+            - complianceType: mustonlyhave
+              objectDefinition:
+                kind: ConfigMap
+                apiVersion: v1
+                metadata:
+                  name: spire-bundle
+                  namespace: zero-trust-workload-identity-manager
+                data:
+                  bundle.crt: |
+                    {{ `{{hub fromConfigMap "zero-trust-workload-identity-manager" "spire-bundle" "bundle.crt" | autoindent hub}}` }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: spire-bundle-{{ $group.name }}-placement-binding
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+placementRef:
+  name: spire-bundle-{{ $group.name }}-placement
+  kind: PlacementRule
+  apiGroup: apps.open-cluster-management.io
+subjects:
+  - name: spire-bundle-{{ $group.name }}-policy
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: PlacementRule
+metadata:
+  name: spire-bundle-{{ $group.name }}-placement
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  clusterConditions:
+    - status: 'True'
+      type: ManagedClusterConditionAvailable
+  clusterSelector:
+    matchExpressions:
+    - key: local-cluster
+      operator: NotIn
+      values:
+      - "true"
+    matchLabels:
+      clusterGroup: {{ $group.name }}
+{{- end }}
+

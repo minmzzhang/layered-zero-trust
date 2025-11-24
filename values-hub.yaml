@@ -167,6 +167,17 @@ clusterGroup:
       name: acm-managed-clusters
       project: hub
       path: charts/acm-managed-clusters
+      ignoreDifferences:
+        - group: cluster.open-cluster-management.io
+          kind: ManagedClusterInfo
+          jsonPointers:
+            - /metadata
+            - /status
+        - group: policy.open-cluster-management.io
+          kind: Policy
+          jsonPointers:
+            - /metadata
+            - /status
     compliance-scanning:
       name: compliance-scanning
       namespace: openshift-compliance
@@ -363,6 +374,29 @@ clusterGroup:
             operator: In
             values:
               - OpenShift
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - RespectIgnoreDifferences=true
+          - SkipDryRunOnMissingResource=true
+          - ApplyOutOfSyncOnly=true
+        ignoreDifferences:
+          - group: ""
+            kind: Namespace
+            jsonPointers:
+              - /metadata
+          - group: ""
+            kind: ConfigMap
+            jsonPointers:
+              - /metadata
+          - group: operators.coreos.com
+            kind: OperatorGroup
+            jsonPointers:
+              - /metadata
+          - group: operators.coreos.com
+            kind: Subscription
+            jsonPointers:
+              - /status
     production:
       name: production
       helmOverrides:
@@ -376,6 +410,29 @@ clusterGroup:
             operator: In
             values:
               - OpenShift
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - RespectIgnoreDifferences=true
+          - SkipDryRunOnMissingResource=true
+          - ApplyOutOfSyncOnly=true
+        ignoreDifferences:
+          - group: ""
+            kind: Namespace
+            jsonPointers:
+              - /metadata
+          - group: ""
+            kind: ConfigMap
+            jsonPointers:
+              - /metadata
+          - group: operators.coreos.com
+            kind: OperatorGroup
+            jsonPointers:
+              - /metadata
+          - group: operators.coreos.com
+            kind: Subscription
+            jsonPointers:
+              - /status
 
     # exampleRegion:
     #   name: group-one

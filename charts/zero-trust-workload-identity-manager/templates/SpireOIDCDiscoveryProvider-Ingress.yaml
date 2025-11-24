@@ -1,3 +1,4 @@
+{{- if .Values.spire.server.enabled }}
 {{- if not (eq .Values.spire.oidcDiscoveryProvider.ingress.operatorManaged "true") -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -19,4 +20,5 @@ spec:
                 name: {{ .Values.spire.oidcDiscoveryProvider.service.name }}
                 port:
                   number: {{ .Values.spire.oidcDiscoveryProvider.service.port }}
+{{- end }}
 {{- end }}

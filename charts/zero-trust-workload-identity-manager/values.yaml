@@ -20,6 +20,9 @@ spire:
         type: "auto"
         hostCertBasePath: /var/lib/kubelet/pki
         hostCertFileName: ""
+    federation:
+      enabled: false
+      bundleEndpoint: ""
 
   oidcDiscoveryProvider:
     agentSocketName: "spire-agent.sock"

@@ -64,7 +64,7 @@ clusterGroup:
         - name: spire.agent.federation.enabled
           value: true
         - name: spire.agent.federation.bundleEndpoint
-          value: "https://spire-server.apps.{{ $.Values.global.hubClusterDomain }}/bundle"
+          value: "https://spire-server.{{ $.Values.global.hubClusterDomain }}/bundle"
     # SYFT SBOM Scanner - runs on dev cluster to scan production
     # Submits SBOMs to hub RHTPA instance
     trusted-profile-analyzer:

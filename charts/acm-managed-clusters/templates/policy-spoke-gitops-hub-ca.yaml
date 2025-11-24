@@ -37,6 +37,17 @@ spec:
                     {{ `{{hub fromConfigMap "" "kube-root-ca.crt" "ca.crt" | autoindent hub}}` }}
                   hub-openshift-service-ca.crt: |
                     {{ `{{hub fromConfigMap "" "openshift-service-ca.crt" "service-ca.crt" | autoindent hub}}` }}
+            - complianceType: mustonlyhave
+              objectDefinition:
+                kind: Secret
+                apiVersion: v1
+                metadata:
+                  name: hub-ca
+                  namespace: golang-external-secrets
+                type: Opaque
+                stringData:
+                  hub-kube-root-ca.crt: |
+                    {{ `{{hub fromConfigMap "" "kube-root-ca.crt" "ca.crt" | autoindent hub}}` }}
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

@@ -64,7 +64,7 @@ clusterGroup:
         - name: spire.agent.federation.enabled
           value: true
         - name: spire.agent.federation.bundleEndpoint
-          value: "https://spire-server.{{ .Values.global.hubClusterDomain }}/bundle"
+          value: "https://spire-server.apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com/bundle"
     # SYFT SBOM Scanner - runs on dev cluster to scan production
     # Submits SBOMs to hub RHTPA instance
     trusted-profile-analyzer:
@@ -88,7 +88,7 @@ clusterGroup:
         # RHTPA API URL - point to hub cluster's RHTPA service
         # NOTE: Due to RHTPA operator bug, actual route is "servertrustify" not "trustify"
         - name: rhtpa.syft.apiUrl
-          value: "https://servertrustify.{{ .Values.global.hubClusterDomain }}"
+          value: "https://servertrustify.apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com"
         
         # Enable production image discovery
         - name: rhtpa.imageDiscovery.enabled
@@ -97,10 +97,9 @@ clusterGroup:
         # Configure production cluster (ACM managed cluster name from hub)
         # Credentials automatically retrieved from Vault via SPIFFE authentication
         # Cluster info passed from hub via helmOverrides in managedClusterGroups
-        # Base domain extracted from hubClusterDomain (e.g., apps.ztvp-hub.example.com -> example.com)
-        # Constructs: https://api.{clusterName}.{baseDomain}:6443
+        # productionClusterName (ztvp-prod) + base domain (minzhang.edge-sro.rhecoeng.com)
         - name: rhtpa.imageDiscovery.productionCluster.url
-          value: "https://api.{{ .Values.global.productionClusterName }}.{{ .Values.global.hubClusterDomain | regexReplaceAll \"^apps\\\\.[^.]+\\\\.\" \"\" }}:6443"
+          value: "https://api.ztvp-prod.minzhang.edge-sro.rhecoeng.com:6443"
         - name: rhtpa.imageDiscovery.productionCluster.namespaces[0]
           value: "qtodo-production"  # Primary production application
         - name: rhtpa.imageDiscovery.productionCluster.namespaces[1]
@@ -114,13 +113,13 @@ clusterGroup:
         
         # Vault configuration (uses hub's Vault)
         - name: rhtpa.imageDiscovery.vault.url
-          value: "https://vault.{{ .Values.global.hubClusterDomain }}"
+          value: "https://vault.apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com"
         - name: rhtpa.imageDiscovery.vault.role
           value: "image-discovery"
         
         # Configure RHTPA API URL on hub for SBOM upload
         - name: rhtpa.zeroTrust.keycloak.url
-          value: "https://keycloak.{{ .Values.global.hubClusterDomain }}"
+          value: "https://keycloak.apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com"
         - name: rhtpa.zeroTrust.keycloak.realm
           value: "ztvp"
   sharedValueFiles:

@@ -290,11 +290,11 @@ clusterGroup:
         argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa and dependencies
       overrides:
         - name: rhtpa.zeroTrust.spire.trustDomain
-          value: apps.{{ .Values.global.clusterDomain }}
+          value: apps.{{ $.Values.global.clusterDomain }}
         - name: rhtpa.zeroTrust.vault.url
           value: https://vault.vault.svc.cluster.local:8200
         - name: rhtpa.zeroTrust.keycloak.url
-          value: https://keycloak.{{ .Values.global.clusterDomain }}
+          value: https://keycloak.{{ $.Values.global.clusterDomain }}
         # SYFT SBOM Generator - DISABLED on Hub
         # 
         # PRODUCTION ARCHITECTURE:

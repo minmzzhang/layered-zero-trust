@@ -1,4 +1,3 @@
-{{- if .Values.spire.agent.enabled }}
 apiVersion: operator.openshift.io/v1alpha1
 kind: SpireAgent
 metadata:
@@ -16,6 +15,5 @@ spec:
 {{- if .Values.spire.agent.federation.enabled }}
   federationRelationships:
     - bundleEndpoint: {{ tpl .Values.spire.agent.federation.bundleEndpoint $ }}
-{{- end }}
 {{- end }}
 {{- end }}

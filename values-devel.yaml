@@ -54,13 +54,10 @@ clusterGroup:
       annotations:
         argocd.argoproj.io/sync-wave: "5"
       overrides:
-        - name: spire.server.enabled
-          value: false
-        - name: spire.agent.enabled
-          value: true
         - name: spire.clusterName
           value: dev
         # Federation with hub SPIRE server
+        # Both server and agent are enabled by default in chart
         - name: spire.agent.federation.enabled
           value: true
         - name: spire.agent.federation.bundleEndpoint

@@ -1,0 +1,279 @@
+{{- if .Values.rhtpa.syft.enabled }}
+{{- if .Values.rhtpa.syft.scanner.enabled }}
+---
+# CronJob for scheduled SBOM generation
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: syft-sbom-scanner
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "26"
+spec:
+  suspend: {{ .Values.rhtpa.syft.scanner.suspend | default false }}
+  schedule: {{ .Values.rhtpa.syft.scanner.schedule | quote }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.rhtpa.syft.scanner.backoffLimit }}
+      ttlSecondsAfterFinished: {{ .Values.rhtpa.syft.scanner.ttlSecondsAfterFinished | default 600 }}
+      template:
+        metadata:
+          labels:
+            app: syft-sbom-scanner
+            component: sbom-scanner
+            cronjob: "true"
+        spec:
+          serviceAccountName: syft
+          restartPolicy: {{ .Values.rhtpa.syft.scanner.restartPolicy }}
+          shareProcessNamespace: true  # Allow containers to signal each other
+          
+          initContainers:
+          {{- if gt (int .Values.rhtpa.syft.scanner.healthCheckTimeout) 0 }}
+          # Wait for RHTPA server to be ready with health check
+          - name: wait-for-rhtpa
+            image: {{ .Values.rhtpa.syft.image }}
+            command:
+            - sh
+            - -c
+            - |
+              echo "Checking RHTPA server health..."
+              SERVER_URL="https://server.{{ .Values.rhtpa.namespace }}.svc.cluster.local"
+              MAX_WAIT={{ .Values.rhtpa.syft.scanner.healthCheckTimeout }}
+              INTERVAL=5
+              
+              i=0
+              while [ $i -lt $MAX_WAIT ]; do
+                if curl -k -s -f "${SERVER_URL}/health/ready" >/dev/null 2>&1; then
+                  echo "RHTPA server is ready! (after ${i} seconds)"
+                  exit 0
+                fi
+                echo "Waiting for RHTPA server... (${i}/${MAX_WAIT}s)"
+                sleep $INTERVAL
+                i=$((i + INTERVAL))
+              done
+              echo "ERROR: RHTPA server not ready after ${MAX_WAIT} seconds"
+              exit 1
+          {{- end }}
+          
+          # Wait for SPIFFE workload API socket
+          - name: wait-for-spiffe
+            image: {{ .Values.rhtpa.syft.image }}
+            command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for SPIFFE workload API socket..."
+              i=0
+              while [ $i -lt 30 ]; do
+                if [ -S /spiffe-workload-api/spire-agent.sock ]; then
+                  echo "SPIFFE socket found!"
+                  exit 0
+                fi
+                i=$((i + 1))
+                echo "Waiting... ($i/30)"
+                sleep 2
+              done
+              echo "ERROR: SPIFFE socket not found after 60 seconds"
+              exit 1
+            volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /spiffe-workload-api
+              readOnly: true
+          
+          containers:
+          # SPIFFE Helper - Generates JWT tokens
+          - name: spiffe-helper
+            image: ghcr.io/spiffe/spiffe-helper:0.10.1
+            imagePullPolicy: IfNotPresent
+            args:
+            - -config
+            - /spiffe-config/helper.conf
+            env:
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: unix:///spiffe-workload-api/spire-agent.sock
+            volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /spiffe-workload-api
+              readOnly: true
+            - name: spiffe-config
+              mountPath: /spiffe-config
+              readOnly: true
+            - name: spiffe-jwt
+              mountPath: /run/secrets/spiffe
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "50m"
+              limits:
+                memory: "128Mi"
+                cpu: "100m"
+          
+          # SYFT - Generates SBOMs and submits to RHTPA
+          - name: syft
+            image: {{ .Values.rhtpa.syft.image }}
+            imagePullPolicy: IfNotPresent
+            command: ["/bin/bash", "-c"]
+            args:
+            - |
+              set -ex
+              echo "Initializing scanner..."
+              
+              # Install to /tmp (world writable)
+              mkdir -p /tmp/bin
+              export PATH="/tmp/bin:$HOME/.local/bin:$PATH"
+              
+              # Install Python packages for API upload script
+              echo "Installing Python packages (requests)..."
+              # Install pip if not available
+              if ! command -v pip &> /dev/null; then
+                curl -sSfL https://bootstrap.pypa.io/get-pip.py | python3 - --user
+              fi
+              # Install requests
+              python3 -m pip install --user --no-warn-script-location requests urllib3
+              
+              # Install syft
+              # Note: syft installation is handled inside generate-sboms.sh too,
+              # but ensuring dependencies here makes debugging easier.
+              
+              # Install jq (static binary, no root needed)
+              if ! command -v jq &> /dev/null; then
+                echo "Installing jq..."
+                curl -sSfL -o /tmp/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+                chmod +x /tmp/bin/jq
+              fi
+              
+              echo "Dependencies installed successfully"
+              echo "Python version: $(python3 --version)"
+              echo "Requests version: $(python3 -c 'import requests; print(requests.__version__)')"
+              
+              echo "Starting scheduled SBOM scan at $(date)"
+              echo ""
+              
+              # Wait for SPIFFE helper to generate JWT
+              sleep 10
+              
+              # Execute SBOM generation script
+              /scripts/generate-sboms.sh
+              
+              echo ""
+              echo "Scheduled scan completed at $(date)"
+            env:
+            - name: HOME
+              value: "/tmp"
+            - name: SYFT_CACHE_DIR
+              value: /tmp/.cache/syft
+            - name: VAULT_ADDR
+              value: {{ .Values.rhtpa.zeroTrust.vault.url | quote }}
+            - name: VAULT_SECRET_PATH
+              value: {{ .Values.rhtpa.syft.vault.secretPath | quote }}
+            - name: VAULT_SKIP_VERIFY
+              value: "true"
+            - name: SBOM_FORMAT
+              value: {{ .Values.rhtpa.syft.format | quote }}
+            # RHTPA API Upload Configuration
+            - name: RHTPA_API_URL
+              {{- if .Values.rhtpa.syft.apiUrl }}
+              value: {{ .Values.rhtpa.syft.apiUrl | quote }}
+              {{- else }}
+              value: "https://server.{{ .Values.rhtpa.namespace }}.svc.cluster.local"
+              {{- end }}
+            - name: OIDC_ISSUER_URL
+              value: {{ include "rhtpa-operator.keycloakOIDCIssuer" . | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.rhtpa.zeroTrust.keycloak.clients.cli.clientId | default "rhtpa-cli" | quote }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rhtpa.zeroTrust.keycloak.clients.cli.secretName | default "rhtpa-oidc-cli-secret" }}
+                  key: client-secret
+            volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: spiffe-jwt
+              mountPath: /run/secrets/spiffe
+              readOnly: true
+            - name: output
+              mountPath: /tmp/sboms
+            - name: service-ca
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            - name: ingress-ca
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount/ingress-ca
+              readOnly: true
+{{- if .Values.rhtpa.localImageDiscovery.enabled }}
+            - name: local-images
+              mountPath: /config/local-images
+              readOnly: true
+{{- end }}
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "1Gi"
+                cpu: "1000m"
+          
+          volumes:
+          # SPIFFE CSI driver volume
+          - name: spiffe-workload-api
+            csi:
+              driver: csi.spiffe.io
+              readOnly: true
+          
+          # SPIFFE helper configuration
+          - name: spiffe-config
+            configMap:
+              name: syft-spiffe-helper-config
+              defaultMode: 0644
+          
+          # Shared volume for JWT tokens
+          - name: spiffe-jwt
+            emptyDir:
+              medium: Memory
+          
+          # SBOM generation scripts (bash and Python)
+          - name: script
+            projected:
+              defaultMode: 0755
+              sources:
+              - configMap:
+                  name: syft-sbom-generator-script
+              - configMap:
+                  name: syft-python-scripts
+          
+          # OpenShift service CA bundle for SSL verification
+          - name: service-ca
+            configMap:
+              name: syft-service-ca
+              items:
+              - key: service-ca.crt
+                path: service-ca.crt
+          
+          # OpenShift Ingress CA bundle for OIDC verification
+          - name: ingress-ca
+            configMap:
+              name: rhtpa-ingress-ca
+              items:
+              - key: ca.crt
+                path: ca.crt
+          
+{{- if .Values.rhtpa.localImageDiscovery.enabled }}
+          # Local cluster images discovered by image-discovery job
+          - name: local-images
+            configMap:
+              name: local-cluster-images
+              optional: true
+              items:
+              - key: images.txt
+                path: images.txt
+{{- end }}
+          
+          # Output directory for SBOMs
+          - name: output
+            emptyDir: {}
+{{- end }}
+{{- end }}

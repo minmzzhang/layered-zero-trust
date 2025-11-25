@@ -1,0 +1,58 @@
+{{- if .Values.rhtpa.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rhtpa-cr-creator-script
+  namespace: {{ .Values.rhtpa.namespace }}
+  labels:
+    {{- include "rhtpa-operator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+data:
+  create-cr.sh: |
+    #!/bin/bash
+    set -e
+
+    echo "=== RHTPA CR Creator ==="
+    echo "Namespace: ${NAMESPACE}"
+    echo "OBC Name: ${OBC_NAME}"
+
+    # Wait for OBC ConfigMap to be available
+    echo "Waiting for OBC ConfigMap..."
+    MAX_RETRIES=60
+    RETRY_INTERVAL=5
+
+    for i in $(seq 1 ${MAX_RETRIES}); do
+      if oc get configmap "${OBC_NAME}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+        echo "OBC ConfigMap found"
+        break
+      fi
+      if [ "$i" -eq "${MAX_RETRIES}" ]; then
+        echo "ERROR: OBC ConfigMap not found after ${MAX_RETRIES} retries"
+        exit 1
+      fi
+      echo "Waiting... ($i/${MAX_RETRIES})"
+      sleep ${RETRY_INTERVAL}
+    done
+
+    # Get bucket name from OBC ConfigMap
+    echo "Extracting bucket name from OBC ConfigMap..."
+    S3_BUCKET=$(oc get configmap "${OBC_NAME}" -n "${NAMESPACE}" -o jsonpath='{.data.BUCKET_NAME}')
+
+    if [ -z "${S3_BUCKET}" ]; then
+      echo "ERROR: Could not extract bucket name from OBC ConfigMap"
+      exit 1
+    fi
+
+    echo "S3 Bucket: ${S3_BUCKET}"
+
+    # Read the CR template and substitute the bucket name
+    echo "Creating TrustedProfileAnalyzer CR..."
+    cat /templates/cr-template.yaml | \
+      sed "s|\${S3_BUCKET}|${S3_BUCKET}|g" | \
+      oc apply -f -
+
+    echo "TrustedProfileAnalyzer CR created successfully!"
+{{- end }}
+

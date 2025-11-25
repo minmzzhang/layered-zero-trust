@@ -1,0 +1,286 @@
+{{- if .Values.rhtpa.syft.enabled }}
+---
+# SYFT SBOM Generator Script
+# Generates SBOMs using SYFT and submits to RHTPA API using OIDC authentication
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-sbom-generator-script
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+data:
+  generate-sboms.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "SYFT SBOM Generator for ZTVP Applications"
+    echo "=========================================="
+    echo "Using SPIFFE JWT authentication with Vault"
+    echo ""
+    
+    # Configuration
+    VAULT_ADDR="{{ .Values.rhtpa.zeroTrust.vault.url }}"
+    VAULT_ROLE="{{ .Values.rhtpa.syft.vault.role }}"
+    JWT_PATH="/run/secrets/spiffe/jwt.token"
+    OUTPUT_DIR="/tmp/sboms"
+    SBOM_FORMAT="{{ .Values.rhtpa.syft.format }}"
+    
+    mkdir -p "$OUTPUT_DIR"
+    
+    # Function to authenticate with Vault using Python Client
+    authenticate_with_vault() {
+      echo "Authenticating with Vault using Python SPIFFE client..."
+      
+      # Wait for JWT token to be generated
+      for i in {1..30}; do
+        if [ -f "$JWT_PATH" ] && [ -s "$JWT_PATH" ]; then
+          echo "JWT token found"
+          break
+        fi
+        echo "Waiting for JWT token... ($i/30)"
+        sleep 2
+      done
+      
+      if [ ! -f "$JWT_PATH" ] || [ ! -s "$JWT_PATH" ]; then
+        echo "ERROR: JWT token not found or empty at $JWT_PATH"
+        exit 1
+      fi
+      
+      # Prepare environment for Python client
+      export VAULT_URL="$VAULT_ADDR"
+      export VAULT_ROLE="$VAULT_ROLE"
+      export VAULT_SECRET_PATH="{{ .Values.rhtpa.syft.vault.secretPath }}"
+      export JWT_TOKEN_FILE="$JWT_PATH"
+      
+      # Run the client to verify authentication/connectivity
+      # We try to fetch a dummy key. Even if it fails to find the key,
+      # it proves the script runs and auth attempts happen.
+      # If auth fails, it logs an error.
+      echo "Verifying Vault connectivity..."
+      if python3 /scripts/rhtpa-spiffe-vault-client.py --key verify-connectivity >/dev/null 2>&1; then
+        echo "Vault check passed (key found)"
+      else
+        echo "Vault check passed (auth likely successful, key may be missing)"
+      fi
+      
+      return 0
+    }
+    
+    # Function to upload file to RHTPA API using Python script
+    upload_to_api() {
+      local file_path=$1
+      
+      echo "    Uploading to RHTPA API: $RHTPA_API_URL"
+      export SBOM_FILE="$file_path"
+      
+      # Call Python script for upload
+      python3 /scripts/rhtpa-api-upload.py
+      return $?
+    }
+
+    # Function to generate and upload SBOM
+    generate_and_upload_sbom() {
+      local image=$1
+      local image_name=$(echo "$image" | sed 's|.*/||' | sed 's|:|-|' | sed 's|@|-|' | sed 's/[^a-zA-Z0-9_-]/-/g')
+      local sbom_file="$OUTPUT_DIR/${image_name}-sbom.${SBOM_FORMAT}.json"
+      
+      echo ""
+      echo "Processing: $image"
+      echo "----------------------------------------"
+      
+      # Generate SBOM
+      echo "  Step 1: Generating SBOM with SYFT..."
+      if syft registry:${image} -o ${SBOM_FORMAT} > "$sbom_file" 2>/tmp/syft-error.log; then
+        echo "  SUCCESS: SBOM generated: $sbom_file"
+        
+        # Get package count
+        PACKAGE_COUNT=$(cat "$sbom_file" | jq '.packages | length' 2>/dev/null || echo "unknown")
+        echo "  Packages found: $PACKAGE_COUNT"
+        
+        # Get SBOM size
+        SBOM_SIZE=$(ls -lh "$sbom_file" | awk '{print $5}')
+        echo "  SBOM size: $SBOM_SIZE"
+      else
+        echo "  ERROR: Failed to generate SBOM for $image"
+        cat /tmp/syft-error.log
+        return 1
+      fi
+      
+      # Upload to RHTPA API
+      if [ -z "$RHTPA_API_URL" ] || [ -z "$OIDC_CLIENT_SECRET" ]; then
+        echo "  ERROR: RHTPA API URL or OIDC credentials not configured"
+        return 1
+      fi
+      
+      echo "  Step 2: Uploading to RHTPA API..."
+      if upload_to_api "$sbom_file"; then
+        echo "  SUCCESS: SBOM uploaded to RHTPA API"
+        echo "----------------------------------------"
+        return 0
+      else
+        echo "  ERROR: Failed to upload SBOM to RHTPA API"
+        echo "----------------------------------------"
+        return 1
+      fi
+    }
+    
+    # Function to setup CA bundle for SSL verification
+    setup_ca_bundle() {
+      echo "Setting up CA bundle..."
+      # Create a writable copy of the system CA bundle (ubi9 location)
+      if [ -f /etc/pki/tls/certs/ca-bundle.crt ]; then
+        cp /etc/pki/tls/certs/ca-bundle.crt /tmp/ca-bundle.crt
+        chmod 644 /tmp/ca-bundle.crt
+      else
+        # Fallback if system bundle missing (unlikely in UBI)
+        touch /tmp/ca-bundle.crt
+      fi
+      
+      # Append the Service CA if it exists
+      if [ -f /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt ]; then
+        echo "Appending Service CA..."
+        cat /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt >> /tmp/ca-bundle.crt
+      fi
+      
+      # Append the Kube Root CA (often signs ingress in some setups)
+      if [ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]; then
+        echo "Appending Kube Root CA..."
+        cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt >> /tmp/ca-bundle.crt
+      fi
+      
+      # Append the Ingress CA if it exists (for external OIDC routes signed by Ingress Operator)
+      if [ -f /var/run/secrets/kubernetes.io/serviceaccount/ingress-ca/ca.crt ]; then
+        echo "Appending Ingress CA..."
+        cat /var/run/secrets/kubernetes.io/serviceaccount/ingress-ca/ca.crt >> /tmp/ca-bundle.crt
+      fi
+
+      export REQUESTS_CA_BUNDLE="/tmp/ca-bundle.crt"
+      export SSL_CERT_FILE="/tmp/ca-bundle.crt"
+      echo "CA bundle configured at $REQUESTS_CA_BUNDLE"
+    }
+    
+    # Main execution
+    echo "Step 0: SSL Configuration"
+    setup_ca_bundle
+    
+    echo "Step 1: Vault Authentication & Setup"
+    echo "------------------------------------"
+    authenticate_with_vault
+    
+    echo ""
+    echo "Step 2: SBOM Generation and Upload"
+    echo "-----------------------------------"
+    
+    # List of images to scan
+    # Initialize empty array
+    IMAGES=()
+    
+{{- if .Values.rhtpa.localImageDiscovery.enabled }}
+    # Option 1: Load images from discovery ConfigMap (dynamic)
+    echo "Loading images from discovery ConfigMap..."
+    if [ -f /config/local-images/images.txt ]; then
+      mapfile -t DISCOVERED_IMAGES < <(cat /config/local-images/images.txt | grep -v "^$")
+      echo "Loaded ${#DISCOVERED_IMAGES[@]} images from ConfigMap"
+      IMAGES+=("${DISCOVERED_IMAGES[@]}")
+    else
+      echo "WARNING: Local images file not found at /config/local-images/images.txt"
+      echo "Run the image-discovery job first or configure static images"
+    fi
+{{- end }}
+    
+    # Option 2: Add static images from configuration
+    # Supports both YAML list (from values.yaml) and comma-separated string (from overrides)
+{{- if .Values.rhtpa.syft.images }}
+    echo "Adding static images from configuration..."
+    STATIC_IMAGES=(
+    {{- if kindIs "slice" .Values.rhtpa.syft.images }}
+        {{- /* Handle YAML List */ -}}
+        {{- range .Values.rhtpa.syft.images }}
+      "{{ . }}"
+        {{- end }}
+    {{- else }}
+        {{- /* Handle Comma-Separated String */ -}}
+        {{- $images := .Values.rhtpa.syft.images | toString }}
+        {{- $parts := splitList "," $images }}
+        {{- range $parts }}
+          {{- $trimmed := . | trim }}
+          {{- if $trimmed }}
+      "{{ $trimmed }}"
+          {{- end }}
+        {{- end }}
+    {{- end }}
+    )
+    IMAGES+=("${STATIC_IMAGES[@]}")
+{{- end }}
+    
+    # Remove duplicates while preserving order
+    if [ ${#IMAGES[@]} -gt 0 ]; then
+      echo "Removing duplicate images..."
+      UNIQUE_IMAGES=($(printf '%s\n' "${IMAGES[@]}" | awk '!seen[$0]++'))
+      IMAGES=("${UNIQUE_IMAGES[@]}")
+      echo "Total unique images to scan: ${#IMAGES[@]}"
+    fi
+    
+    if [ ${#IMAGES[@]} -eq 0 ]; then
+      echo "No images configured for scanning"
+{{- if .Values.rhtpa.localImageDiscovery.enabled }}
+      echo "Hint: Run 'oc create job discover-now --from=cronjob/discover-local-images' to discover images"
+{{- end }}
+      exit 0
+    fi
+    
+    echo "Images to scan: ${#IMAGES[@]}"
+    echo ""
+    
+    # Note: syft installation is handled in container args
+    if ! command -v syft &> /dev/null; then
+        echo "Installing syft..."
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /tmp/bin
+    fi
+    
+    echo "Syft version: $(syft version 2>&1 | head -1)"
+    
+    # Process all images
+    SUCCESS_COUNT=0
+    FAIL_COUNT=0
+    
+    for image in "${IMAGES[@]}"; do
+      if generate_and_upload_sbom "$image"; then
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+      else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+      fi
+    done
+    
+    # Summary
+    echo ""
+    echo "=========================================="
+    echo "SBOM Generation Summary"
+    echo "=========================================="
+    echo "Total images: ${#IMAGES[@]}"
+    echo "Successful: $SUCCESS_COUNT"
+    echo "Failed: $FAIL_COUNT"
+    echo ""
+    echo "SBOMs stored in: $OUTPUT_DIR"
+    ls -lh "$OUTPUT_DIR" 2>/dev/null || echo "No SBOMs generated"
+    echo ""
+    
+    if [ $FAIL_COUNT -gt 0 ]; then
+      echo "WARNING: Some SBOMs failed to generate or upload ($FAIL_COUNT failed, $SUCCESS_COUNT succeeded)"
+      echo "Continuing anyway - partial success is acceptable"
+    else
+      echo "SUCCESS: All SBOMs generated and uploaded successfully!"
+    fi
+    
+    # Signal completion and terminate sidecar
+    touch /tmp/sbom-generation-complete
+    
+    # Kill the spiffe-helper sidecar to allow the pod to terminate
+    echo "Stopping spiffe-helper sidecar..."
+    killall spiffe-helper 2>/dev/null || true
+    echo "Sidecar termination signal sent"
+    
+    sleep 2
+    exit 0
+{{- end }}

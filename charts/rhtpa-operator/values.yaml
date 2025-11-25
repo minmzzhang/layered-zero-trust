@@ -1,0 +1,221 @@
+# Red Hat Trusted Profile Analyzer (RHTPA) Operator Configuration
+# Uses the RHTPA Operator to deploy and manage Trustification services
+# Integrates with Zero Trust architecture: SPIRE, Vault, Keycloak, NooBaa
+
+rhtpa:
+  # Enable/disable RHTPA deployment
+  enabled: true
+  
+  # TrustedProfileAnalyzer CR name
+  name: "trusted-profile-analyzer"
+  
+  # Namespace for RHTPA deployment
+  namespace: trusted-profile-analyzer
+  
+  # Route hostname prefix
+  # This prefix is prepended to the cluster domain to form the route hostname
+  # NOTE: Due to RHTPA operator bug, "server" is prepended to the result
+  # Example: "trustify" with domain "apps.domain.com" generates: servertrustify.apps.domain.com
+  routePrefix: "trustify"
+  
+  # Zero Trust Integration
+  zeroTrust:
+    spire:
+      enabled: true
+      trustDomain: "apps.example.com"
+    vault:
+      enabled: true
+      url: "https://vault.vault.svc.cluster.local:8200" 
+      role: "rhtpa"
+      policy: "global-secret"
+      secretPath: "secret/data/global/rhtpa"
+    keycloak:
+      enabled: true
+      url: "https://keycloak.apps.example.com"  # MUST be public route URL (overridden in values-hub.yaml)
+      realm: "ztvp"
+      namespace: "keycloak-system"  # Namespace where Keycloak is deployed
+      instanceName: "keycloak"  # Name of the Keycloak CR
+      userPasswordVaultKey: "secret/data/global/keycloak-users"  # Vault path for RHTPA user password
+      # OIDC Client Configuration
+      clients:
+        frontend:
+          clientId: "rhtpa-frontend"  # Public client for RHTPA UI
+        cli:
+          clientId: "rhtpa-cli"  # Confidential client for RHTPA CLI/API
+          secretName: "rhtpa-oidc-cli-secret"  # Kubernetes secret containing client secret
+  
+  # TLS Configuration
+  tls:
+    ingressCA:
+      enabled: true  # Mount OpenShift ingress CA certificate
+      certificate: ""  # PEM-encoded certificate (will be populated from ingress secret)
+
+  # NEW: Module Configuration (Ported from AWS Config)
+  modules:
+    # Enable Database Creation Module
+    createDatabase:
+      enabled: true
+
+    # Enable Importers Module
+    createImporters:
+      enabled: true
+      importers:
+        cve:
+          cve:
+            description: CVE list v5
+            disabled: false
+            period: 1d  # Default: 1 day (override in values-hub.yaml for custom schedule)
+            source: https://github.com/CVEProject/cvelistV5
+        osv-github:
+          osv:
+            description: GitHub Advisory Database
+            disabled: false
+            path: advisories
+            period: 1d  # Default: 1 day (override in values-hub.yaml for custom schedule)
+            source: https://github.com/github/advisory-database
+        redhat-csaf:
+          csaf:
+            description: All Red Hat CSAF data
+            disabled: true  # Enable if needed (large download)
+            fetchRetries: 50
+            period: 1d
+            source: redhat.com
+
+    # Configure Importer Runtime
+    importer:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 0.5
+          memory: 4Gi
+        limits:
+          cpu: 1.0
+          memory: 8Gi
+
+    # Configure API Server Runtime
+    server:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 0.5
+          memory: 4Gi
+        limits:
+          cpu: 1.0
+          memory: 8Gi
+  
+  # PostgreSQL Database Configuration
+  database:
+    create: true
+    name: "rhtpa"
+    username: "rhtpa"
+    secretName: "rhtpa-db-secret"
+    passwordVaultKey: "secret/data/global/rhtpa"
+    storageSize: "10Gi"
+    image: "registry.redhat.io/rhel8/postgresql-16"
+  
+  # Object Storage Configuration (NooBaa MCG)
+  objectStorage:
+    enabled: true
+    region: "us-east-1"  # NooBaa default region
+    endpoint: "s3.openshift-storage.svc:443"  # NooBaa MCG S3 endpoint (without https:// prefix)
+    objectBucketClaim:
+      name: "rhtpa-s3-storage"
+      bucketName: "trustify"
+      storageClass: "openshift-storage.noobaa.io"
+  
+  # Monitoring configuration
+  monitoring:
+    enabled: true
+  
+  # External access configuration
+  externalAccess:
+    enabled: true
+  
+  # SYFT SBOM Generator Integration
+  # 
+  # DEPLOYMENT OPTIONS:
+  # 
+  # 1. RECOMMENDED: Tekton Pipeline Task (Production)
+  #    - Deploy SYFT as part of CI/CD pipeline on dev spoke cluster
+  #    - Generates SBOM during image build process
+  #    - Integrates with image push to registry
+  #    - Submits SBOM to hub RHTPA API
+  # 
+  # 2. Standalone Deployment (Testing/Demo)
+  #    - Enable standalone SYFT Job/CronJob (set enabled: true below)
+  #    - Useful for testing SBOM generation
+  #    - Good for scheduled scanning of existing images
+  #    - Can run on hub for demo purposes
+  # 
+  # 3. Hybrid Approach
+  #    - Tekton for new builds
+  #    - CronJob for scanning existing/third-party images
+  syft:
+    enabled: false  # Set to true to enable standalone SBOM generation
+    # Use UBI-based image with syft, bash, curl, and jq for full script support
+    # Same image used for main container and init containers (includes curl for health checks)
+    image: "registry.redhat.io/ubi9/ubi:latest"
+    format: "spdx-json"  # Options: spdx-json, cyclonedx-json, syft-json
+    
+    # RHTPA API URL for SBOM upload
+    # Default: local cluster service (for hub deployments)
+    # Override: hub cluster public route (for spoke cluster deployments)
+    apiUrl: ""  # Empty = use local service URL
+    
+    # SPIFFE/JWT Authentication
+    spiffe:
+      enabled: true
+      audience: "syft"  # JWT audience for Vault authentication
+    
+    # Vault integration
+    vault:
+      role: "syft"
+      secretPath: "secret/data/global/rhtpa"  # Use same secrets as RHTPA
+    
+    # Images to scan (can be overridden in values-hub.yaml)
+    # Accepts either a list of strings or a comma-separated string
+    images:
+      - "quay.io/validatedpatterns/qtodo:latest"
+    
+    # Scanner configuration (CronJob)
+    # Replaces previous cronjob/job split configuration
+    scanner:
+      enabled: true  # Create CronJob by default
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      suspend: true  # Suspend by default (manual trigger only)
+      backoffLimit: 3  # Retry up to 3 times on failure
+      restartPolicy: "OnFailure"
+      ttlSecondsAfterFinished: 600  # Auto-delete jobs
+      # Health check timeout for RHTPA server readiness (seconds)
+      # The init container will actively check the server's /health/ready endpoint
+      # and proceed as soon as it's ready 
+      # Set to 0 to disable the health check
+      healthCheckTimeout: 60  # Maximum wait time: 60 seconds
+  
+  # Local Image Discovery
+  # Discovers images running on the current cluster to feed into the scanner
+  localImageDiscovery:
+    enabled: true  # Set to true to enable local image discovery cronjob
+    image: "registry.redhat.io/openshift4/ose-cli:latest"
+    
+    # Image filters
+    filters:
+      # Exclude patterns (regex)
+      exclude:
+        - "k8s.gcr.io"
+        - "gcr.io/google"
+        - "quay.io/openshift"
+        - "registry.redhat.io"
+        - "registry.connect.redhat.com"
+      # Include patterns (optional - if set, only matching images are included)
+      include: []
+      #  - "quay.io/myorg"
+      #  - "registry.mycompany.com"
+
+# Global Configuration
+global:
+  imageRegistry: registry.redhat.io
+  secretStore:
+    name: "vault-backend"
+    kind: "ClusterSecretStore"
+

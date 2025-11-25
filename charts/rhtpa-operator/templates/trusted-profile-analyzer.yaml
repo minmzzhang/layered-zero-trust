@@ -1,0 +1,97 @@
+{{- if .Values.rhtpa.enabled }}
+---
+# Service account for the rhtpa-cr-creator job
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  labels:
+    {{- include "rhtpa-operator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+---
+# Role for creating TrustedProfileAnalyzer CR
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  labels:
+    {{- include "rhtpa-operator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+rules:
+- apiGroups: ["rhtpa.io"]
+  resources: ["trustedprofileanalyzers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+---
+# RoleBinding for the rhtpa-cr-creator service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  labels:
+    {{- include "rhtpa-operator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rhtpa-cr-creator
+subjects:
+- kind: ServiceAccount
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+---
+# Job to create TrustedProfileAnalyzer CR with the bucket name from OBC
+# Only the bucket name needs substitution - credentials use valueFrom which is supported
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rhtpa-cr-creator
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      name: rhtpa-cr-creator
+    spec:
+      serviceAccountName: rhtpa-cr-creator
+      restartPolicy: OnFailure
+      
+      containers:
+      - name: create-cr
+        image: registry.redhat.io/openshift4/ose-cli:latest
+        command: ["/bin/bash", "/scripts/create-cr.sh"]
+        env:
+        - name: NAMESPACE
+          value: {{ .Values.rhtpa.namespace }}
+        - name: OBC_NAME
+          value: {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }}
+        volumeMounts:
+        - name: cr-template
+          mountPath: /templates
+          readOnly: true
+        - name: scripts
+          mountPath: /scripts
+          readOnly: true
+      
+      volumes:
+      - name: cr-template
+        configMap:
+          name: rhtpa-cr-template
+      - name: scripts
+        configMap:
+          name: rhtpa-cr-creator-script
+          defaultMode: 0755
+{{- end }}
+

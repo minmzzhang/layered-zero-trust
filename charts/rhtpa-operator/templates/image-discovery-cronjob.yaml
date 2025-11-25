@@ -1,0 +1,145 @@
+{{- if .Values.rhtpa.localImageDiscovery.enabled }}
+---
+# Service Account for Image Discovery
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: local-image-discovery
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+---
+# ClusterRole to list pods in all namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: local-image-discovery-runner
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+# Role to manage ConfigMaps in the operator namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: local-image-discovery-configmap
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+# Bind ClusterRole to ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: local-image-discovery-runner
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+subjects:
+  - kind: ServiceAccount
+    name: local-image-discovery
+    namespace: {{ .Values.rhtpa.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: local-image-discovery-runner
+  apiGroup: rbac.authorization.k8s.io
+---
+# Bind Role to ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: local-image-discovery-configmap
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+subjects:
+  - kind: ServiceAccount
+    name: local-image-discovery
+    namespace: {{ .Values.rhtpa.namespace }}
+roleRef:
+  kind: Role
+  name: local-image-discovery-configmap
+  apiGroup: rbac.authorization.k8s.io
+---
+# CronJob to discover images running in the cluster
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: discover-local-images
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+spec:
+  # Run every hour by default (or suspend for manual only)
+  schedule: "0 * * * *"
+  suspend: false
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: image-discovery
+        spec:
+          serviceAccountName: local-image-discovery
+          restartPolicy: OnFailure
+          containers:
+            - name: discovery
+              image: {{ .Values.rhtpa.localImageDiscovery.image }}
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  echo "Starting local image discovery..."
+                  
+                  # 1. Get all unique images from all pods in all namespaces
+                  # Exclude standard openshift namespaces to reduce noise
+                  echo "Listing images from cluster..."
+                  oc get pods -A -o jsonpath='{range .items[*]}{.spec.containers[*].image}{"\n"}{end}' | sort | uniq > /tmp/all_images.txt
+                  
+                  # 2. Apply filters (excludes)
+                  echo "Applying filters..."
+                  cp /tmp/all_images.txt /tmp/filtered_images.txt
+                  
+                  # Filter out excluded patterns
+                  {{- range .Values.rhtpa.localImageDiscovery.filters.exclude }}
+                  grep -vE {{ . | quote }} /tmp/filtered_images.txt > /tmp/filtered_images.txt.tmp && mv /tmp/filtered_images.txt.tmp /tmp/filtered_images.txt || true
+                  {{- end }}
+                  
+                  # Filter IN included patterns (if defined)
+                  {{- if .Values.rhtpa.localImageDiscovery.filters.include }}
+                  echo -n "" > /tmp/included_images.txt
+                  {{- range .Values.rhtpa.localImageDiscovery.filters.include }}
+                  grep -E {{ . | quote }} /tmp/filtered_images.txt >> /tmp/included_images.txt || true
+                  {{- end }}
+                  mv /tmp/included_images.txt /tmp/filtered_images.txt
+                  {{- end }}
+                  
+                  # 3. Create/Update ConfigMap
+                  IMAGE_COUNT=$(wc -l < /tmp/filtered_images.txt)
+                  echo "Found $IMAGE_COUNT unique images after filtering."
+                  
+                  if [ "$IMAGE_COUNT" -eq 0 ]; then
+                    echo "WARNING: No images found after filtering."
+                    # Create empty configmap to avoid errors in scanner
+                    oc create configmap local-cluster-images --from-literal=images.txt="" -n {{ .Values.rhtpa.namespace }} --dry-run=client -o yaml | oc apply -f -
+                  else
+                    echo "Updating 'local-cluster-images' ConfigMap..."
+                    oc create configmap local-cluster-images --from-file=images.txt=/tmp/filtered_images.txt -n {{ .Values.rhtpa.namespace }} --dry-run=client -o yaml | oc apply -f -
+                    
+                    echo "Images found:"
+                    cat /tmp/filtered_images.txt
+                  fi
+                  
+                  echo "Discovery complete."
+{{- end }}
+

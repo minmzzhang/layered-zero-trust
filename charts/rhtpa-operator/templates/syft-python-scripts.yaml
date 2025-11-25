@@ -1,0 +1,13 @@
+{{- if .Values.rhtpa.syft.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-python-scripts
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+data:
+  rhtpa-api-upload.py: {{ .Files.Get "files/rhtpa-api-upload.py" | quote }}
+  rhtpa-spiffe-vault-client.py: {{ .Files.Get "files/rhtpa-spiffe-vault-client.py" | quote }}
+{{- end }}
+

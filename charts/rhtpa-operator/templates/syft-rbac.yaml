@@ -1,0 +1,54 @@
+{{- if .Values.rhtpa.syft.enabled }}
+---
+# ConfigMap for Service CA Injection
+# Used by SYFT pod to trust internal OpenShift services (RHTPA, Vault)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-service-ca
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+    argocd.argoproj.io/sync-wave: "15"
+data: {}
+---
+# Service Account for SYFT Scanner
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: syft
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+---
+# Role to allow reading ConfigMaps (for image discovery)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: syft-configmap-reader
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+# Bind Role to ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: syft-configmap-reader
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+subjects:
+  - kind: ServiceAccount
+    name: syft
+    namespace: {{ .Values.rhtpa.namespace }}
+roleRef:
+  kind: Role
+  name: syft-configmap-reader
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+

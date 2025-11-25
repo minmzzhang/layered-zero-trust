@@ -1,0 +1,146 @@
+{{- if .Values.rhtpa.enabled }}
+---
+# Note: CR template stored in ConfigMap - the rhtpa-cr-creator job substitutes the bucket name
+# Per Red Hat documentation, accessKey/secretKey support valueFrom, but bucket must be a string literal
+# See: https://docs.redhat.com/en/documentation/red_hat_trusted_profile_analyzer/2/html/deployment_guide/rhtpa-with-red-hat-services-values-file-template_deploy
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rhtpa-cr-template
+  namespace: {{ .Values.rhtpa.namespace }}
+  labels:
+    {{- include "rhtpa-operator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "18"
+data:
+  cr-template.yaml: |
+    apiVersion: rhtpa.io/v1
+    kind: TrustedProfileAnalyzer
+    metadata:
+      name: {{ .Values.rhtpa.name }}
+      namespace: {{ .Values.rhtpa.namespace }}
+      labels:
+        {{- include "rhtpa-operator.labels" . | nindent 8 }}
+    spec:
+      appDomain: {{ printf "%s.%s" (.Values.rhtpa.routePrefix | default "trustify") .Values.global.localClusterDomain | quote }}
+      
+      {{- if .Values.rhtpa.tls.ingressCA.enabled }}
+      # Combined trust anchors: ingress CA + OpenShift service CA (for NooBaa S3)
+      tls:
+        additionalTrustAnchor: /etc/rhtpa/tls/combined-ca.crt
+      {{- end }}
+      
+      {{- if .Values.rhtpa.zeroTrust.keycloak.enabled }}
+      oidc:
+        clients:
+          frontend:
+            clientId: {{ .Values.rhtpa.zeroTrust.keycloak.clients.frontend.clientId | default "rhtpa-frontend" | quote }}
+            issuerUrl: {{ include "rhtpa-operator.keycloakOIDCIssuer" . | quote }}
+          cli:
+            clientId: {{ .Values.rhtpa.zeroTrust.keycloak.clients.cli.clientId | default "rhtpa-cli" | quote }}
+            issuerUrl: {{ include "rhtpa-operator.keycloakOIDCIssuer" . | quote }}
+            clientSecret:
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rhtpa.zeroTrust.keycloak.clients.cli.secretName | default "rhtpa-oidc-cli-secret" }}
+                  key: client-secret
+      {{- end }}
+      
+      createDatabase:
+        name: {{ .Values.rhtpa.database.name }}
+        username: {{ .Values.rhtpa.database.username }}
+        password:
+          valueFrom:
+            secretKeyRef:
+              name: rhtpa-db-secret
+              key: password
+      
+      migrateDatabase: {}
+      
+      modules:
+        migrateDatabase:
+          enabled: true
+        
+        createDatabase:
+          enabled: {{ .Values.rhtpa.modules.createDatabase.enabled | default true }}
+          
+        createImporters:
+          enabled: {{ .Values.rhtpa.modules.createImporters.enabled | default true }}
+          importers:
+            cve:
+              cve:
+                disabled: {{ .Values.rhtpa.modules.createImporters.importers.cve.cve.disabled | default false }}
+                period: {{ .Values.rhtpa.modules.createImporters.importers.cve.cve.period | default "1d" }}
+                source: {{ .Values.rhtpa.modules.createImporters.importers.cve.cve.source | default "https://github.com/CVEProject/cvelistV5" }}
+            osv-github:
+              osv:
+                disabled: {{ (index .Values.rhtpa.modules.createImporters.importers "osv-github").osv.disabled | default false }}
+                period: {{ (index .Values.rhtpa.modules.createImporters.importers "osv-github").osv.period | default "1d" }}
+                source: {{ (index .Values.rhtpa.modules.createImporters.importers "osv-github").osv.source | default "https://github.com/github/advisory-database" }}
+                
+        importer:
+          replicas: {{ .Values.rhtpa.modules.importer.replicas | default 1 }}
+          resources:
+            requests:
+              cpu: {{ .Values.rhtpa.modules.importer.resources.requests.cpu | default "0.5" | quote }}
+              memory: {{ .Values.rhtpa.modules.importer.resources.requests.memory | default "4Gi" }}
+          enabled: true
+              
+        server:
+          replicas: {{ .Values.rhtpa.modules.server.replicas | default 1 }}
+          resources:
+            requests:
+              cpu: {{ .Values.rhtpa.modules.server.resources.requests.cpu | default "0.5" | quote }}
+              memory: {{ .Values.rhtpa.modules.server.resources.requests.memory | default "4Gi" }}
+          enabled: true
+
+      database:
+        host: rhtpa-db.{{ .Values.rhtpa.namespace }}.svc.cluster.local
+        name: {{ .Values.rhtpa.database.name }}
+        username:
+          valueFrom:
+            secretKeyRef:
+              name: rhtpa-db-secret
+              key: username
+        password:
+          valueFrom:
+            secretKeyRef:
+              name: rhtpa-db-secret
+              key: password
+      
+      # Storage: accessKey/secretKey use valueFrom (supported), bucket must be literal string
+      # Bucket name is substituted by the rhtpa-cr-creator job from OBC ConfigMap
+      # Per Trustify schema: 'region' field accepts "The AWS region of the bucket, or an endpoint"
+      # Reference: https://github.com/guacsec/trustify-helm-charts/blob/main/charts/trustify/values.schema.yaml
+      storage:
+        type: s3
+        accessKey:
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }}
+              key: AWS_ACCESS_KEY_ID
+        secretKey:
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }}
+              key: AWS_SECRET_ACCESS_KEY
+        bucket: "${S3_BUCKET}"
+        # For NooBaa/MCG, use the S3 endpoint URL instead of AWS region
+        region: {{ printf "https://%s" .Values.rhtpa.objectStorage.endpoint | quote }}
+        # Enable path-style access for S3-compatible storage (NooBaa, MinIO)
+        pathStyle: true
+      
+      {{- if .Values.rhtpa.tls.ingressCA.enabled }}
+      # Mount combined CA bundle (ingress CA + service CA for NooBaa S3)
+      extraVolumes:
+        - name: combined-ca
+          configMap:
+            name: rhtpa-combined-ca
+      
+      extraVolumeMounts:
+        - name: combined-ca
+          mountPath: /etc/rhtpa/tls
+          readOnly: true
+      {{- end }}
+{{- end }}
+

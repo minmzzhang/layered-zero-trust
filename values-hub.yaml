@@ -229,10 +229,11 @@ clusterGroup:
             subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/syft"
             policies:
               - global-secret
-          # Image Discovery vault role (for production cluster credential retrieval)
+          # Image Discovery vault role (for production cluster credential retrieval from spoke cluster)
+          # Note: No subject constraint - runs on spoke cluster with different trust domain
+          # Relies on audience matching only for cross-cluster SPIFFE authentication
           - name: image-discovery
             audience: vault
-            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/image-discovery"
             policies:
               - global-secret
     # Shared Object Storage Backend

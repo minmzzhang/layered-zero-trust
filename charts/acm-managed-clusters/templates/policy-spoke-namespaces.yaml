@@ -25,12 +25,28 @@ spec:
             include:
               - default
           object-templates:
+            # Pattern namespace for ArgoCD applications
             - complianceType: musthave
               objectDefinition:
                 kind: Namespace
                 apiVersion: v1
                 metadata:
                   name: {{ $.Values.global.pattern }}-{{ $group.name }}
+            # Application namespaces from spokeNamespaces list
+            # These are created by ACM policy before ArgoCD applications sync
+            # to ensure policies and applications can deploy resources in them
+{{- if $group.spokeNamespaces }}
+{{- range $group.spokeNamespaces }}
+            - complianceType: musthave
+              objectDefinition:
+                kind: Namespace
+                apiVersion: v1
+                metadata:
+                  name: {{ . }}
+                  labels:
+                    name: {{ . }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

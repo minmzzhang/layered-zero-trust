@@ -367,6 +367,14 @@ clusterGroup:
   managedClusterGroups:
     devel:
       name: devel
+      # Namespaces to create on spoke cluster via ACM policy
+      # Add namespaces needed by applications/policies before ArgoCD deploys
+      spokeNamespaces:
+        - golang-external-secrets
+        - policies
+        - trusted-profile-analyzer  # SYFT scanner
+        - zero-trust-workload-identity-manager  # ZTWIM operator
+        - spire-system  # SPIRE agent for federation
       helmOverrides:
         - name: clusterGroup.isHubCluster
           value: false
@@ -411,6 +419,10 @@ clusterGroup:
               - /status
     production:
       name: production
+      # Namespaces to create on spoke cluster via ACM policy
+      spokeNamespaces:
+        - golang-external-secrets
+        - policies
       helmOverrides:
         - name: clusterGroup.isHubCluster
           value: false

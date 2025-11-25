@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.vaultSpokeJwtConfig.scriptConfigMap.name }}
+  namespace: vault
+  labels:
+    {{- include "vault-spoke-jwt-config.labels" . | nindent 4 }}
+data:
+  configure-spoke-vault-jwt.sh: |
+{{ .Files.Get "files/configure-spoke-vault-jwt.sh" | indent 4 }}
+  values-hub.yaml: |
+{{- toYaml .Values | nindent 4 }}
+

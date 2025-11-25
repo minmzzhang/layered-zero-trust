@@ -205,6 +205,7 @@ rhtpa:
     # Vault configuration for retrieving production cluster credentials
     vault:
       url: "https://vault.vault.svc.cluster.local:8200"
+      authPath: "auth/jwt"  # Vault JWT auth mount path (e.g., "auth/jwt-dev" for spoke clusters)
       role: "image-discovery"  # Vault JWT role for authentication
     
     # SPIFFE configuration for Vault authentication

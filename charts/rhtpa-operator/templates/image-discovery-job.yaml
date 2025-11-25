@@ -98,7 +98,55 @@ spec:
           echo "=========================================="
           echo "Target cluster API: ${PROD_CLUSTER_URL}"
           echo "Target namespaces: ${PRODUCTION_NAMESPACES}"
-          echo "Vault path: ${VAULT_KUBECONFIG_PATH}"
+          echo "Vault auth path: ${VAULT_AUTH_PATH}"
+          echo "Vault secret path: ${VAULT_KUBECONFIG_PATH}"
+          echo ""
+          
+          # ====================================================================
+          # Option 4: Wait for ACM policy to distribute vault-spoke-jwt-ready
+          # ====================================================================
+          echo "Checking Vault spoke JWT configuration readiness..."
+          SPOKE_NAMESPACE="{{ .Values.global.pattern }}-{{ .Values.clusterGroup.name }}"
+          VAULT_JWT_READY=false
+          
+          echo "Attempting Option 4: Waiting for ACM policy distribution..."
+          for i in {1..60}; do
+            if oc get configmap vault-spoke-jwt-ready -n "$SPOKE_NAMESPACE" >/dev/null 2>&1; then
+              echo "SUCCESS: Vault spoke JWT configuration is ready (via ACM policy)"
+              oc get configmap vault-spoke-jwt-ready -n "$SPOKE_NAMESPACE" -o jsonpath='{.data}' | head -20
+              VAULT_JWT_READY=true
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: Timeout waiting for vault-spoke-jwt-ready ConfigMap from ACM"
+            fi
+            echo "  Waiting for vault-spoke-jwt-ready ConfigMap... ($i/60)"
+            sleep 5
+          done
+          
+          # ====================================================================
+          # Fallback to Option 3: Direct Vault check if ACM policy didn't work
+          # ====================================================================
+          if [ "$VAULT_JWT_READY" = "false" ]; then
+            echo ""
+            echo "Falling back to Option 3: Direct Vault jwt-dev mount check..."
+            for i in {1..30}; do
+              VAULT_CHECK=$(curl -sk "${VAULT_ADDR}/v1/sys/auth" | jq -r '.["jwt-dev/"]' 2>/dev/null || echo "null")
+              if [ "$VAULT_CHECK" != "null" ]; then
+                echo "SUCCESS: jwt-dev mount exists in Vault (direct check)"
+                VAULT_JWT_READY=true
+                break
+              fi
+              echo "  Waiting for jwt-dev mount in Vault... ($i/30)"
+              sleep 10
+            done
+          fi
+          
+          if [ "$VAULT_JWT_READY" = "false" ]; then
+            echo "ERROR: Vault spoke JWT configuration not ready after all attempts"
+            echo "Image discovery may fail due to authentication issues"
+            echo "Proceeding anyway to provide diagnostic output..."
+          fi
           echo ""
           
           # Wait for SPIFFE JWT token
@@ -120,9 +168,10 @@ spec:
           echo "JWT token obtained"
           
           # Authenticate with Vault using SPIFFE JWT
+          # Uses cluster-specific JWT auth mount (e.g., auth/jwt-dev for dev spoke cluster)
           echo ""
-          echo "Authenticating with Vault..."
-          VAULT_RESPONSE=$(curl -sk -X POST "${VAULT_ADDR}/v1/auth/jwt/login" \
+          echo "Authenticating with Vault via ${VAULT_AUTH_PATH}..."
+          VAULT_RESPONSE=$(curl -sk -X POST "${VAULT_ADDR}/v1/${VAULT_AUTH_PATH}/login" \
             -H "Content-Type: application/json" \
             -d "{\"role\":\"${VAULT_ROLE}\",\"jwt\":\"${JWT_TOKEN}\"}")
           
@@ -305,6 +354,8 @@ spec:
           value: {{ .Values.rhtpa.imageDiscovery.productionCluster.namespaces | join "," | quote }}
         - name: VAULT_ADDR
           value: {{ .Values.rhtpa.imageDiscovery.vault.url | default "https://vault.vault.svc.cluster.local:8200" | quote }}
+        - name: VAULT_AUTH_PATH
+          value: {{ .Values.rhtpa.imageDiscovery.vault.authPath | default "auth/jwt" | quote }}
         - name: VAULT_ROLE
           value: {{ .Values.rhtpa.imageDiscovery.vault.role | default "image-discovery" | quote }}
         - name: VAULT_KUBECONFIG_PATH

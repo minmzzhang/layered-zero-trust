@@ -1,0 +1,111 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-spoke-jwt-config
+  namespace: vault
+  labels:
+    {{- include "vault-spoke-jwt-config.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: {{ .Values.vaultSpokeJwtConfig.job.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.vaultSpokeJwtConfig.job.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "vault-spoke-jwt-config.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.vaultSpokeJwtConfig.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: configure-spoke-jwt
+          image: registry.redhat.io/openshift4/ose-cli:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              
+              echo "=============================================="
+              echo "Vault Spoke JWT Configuration Job"
+              echo "=============================================="
+              echo ""
+              
+              # Install required tools
+              echo "Installing yq..."
+              curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
+              chmod +x /usr/local/bin/yq
+              
+              echo "Installing jq..."
+              curl -sL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 -o /usr/local/bin/jq
+              chmod +x /usr/local/bin/jq
+              
+              # Wait for Vault to be ready
+              echo ""
+              echo "Waiting for Vault pod to be ready..."
+              for i in {1..30}; do
+                if oc get pod -n vault vault-0 >/dev/null 2>&1; then
+                  if [ "$(oc get pod -n vault vault-0 -o jsonpath='{.status.phase}')" = "Running" ]; then
+                    echo "Vault pod is ready"
+                    break
+                  fi
+                fi
+                echo "Waiting for Vault... ($i/30)"
+                sleep 10
+              done
+              
+              # Check if Vault is unsealed
+              echo ""
+              echo "Checking Vault seal status..."
+              SEALED=$(oc exec -n vault vault-0 -- vault status -format=json 2>/dev/null | jq -r '.sealed // true')
+              if [ "$SEALED" = "true" ]; then
+                echo "ERROR: Vault is sealed. Please unseal Vault before running this configuration."
+                exit 1
+              fi
+              echo "Vault is unsealed and ready"
+              
+              # Wait for spoke clusters to have SPIRE deployed
+              echo ""
+              echo "Checking spoke cluster readiness..."
+              echo "Waiting 60 seconds for spoke clusters to deploy SPIRE..."
+              sleep 60
+              
+              # Run the configuration script
+              echo ""
+              echo "Running spoke JWT configuration..."
+              cd /scripts
+              chmod +x configure-spoke-vault-jwt.sh
+              ./configure-spoke-vault-jwt.sh
+              
+              echo ""
+              echo "=============================================="
+              echo "Configuration Complete!"
+              echo "=============================================="
+              
+              # Create status marker for ACM policy distribution
+              echo ""
+              echo "Creating status ConfigMap for ACM distribution..."
+              oc create configmap vault-spoke-jwt-ready \
+                -n {{ .Values.global.pattern }}-hub \
+                --from-literal=status=ready \
+                --from-literal=timestamp=$(date -Iseconds) \
+                --from-literal=message="Vault spoke JWT authentication mounts configured" \
+                --dry-run=client -o yaml | oc apply -f -
+              
+              oc label configmap vault-spoke-jwt-ready \
+                -n {{ .Values.global.pattern }}-hub \
+                vault-spoke-jwt-status=ready \
+                --overwrite
+              
+              echo "Status ConfigMap created successfully"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ .Values.vaultSpokeJwtConfig.scriptConfigMap.name }}
+            defaultMode: 0755
+

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: vault-spoke-jwt-config
+description: Configure Vault JWT authentication for spoke clusters after they are deployed
+type: application
+version: 0.1.0
+appVersion: "1.0"
+

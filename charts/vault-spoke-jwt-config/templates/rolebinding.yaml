@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vault-spoke-jwt-config
+  namespace: vault
+  labels:
+    {{- include "vault-spoke-jwt-config.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vault-spoke-jwt-config
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.vaultSpokeJwtConfig.serviceAccount.name }}
+    namespace: vault
+

@@ -167,9 +167,6 @@ clusterGroup:
       overrides:
         - name: global.secretStore.backend
           value: none
-        # Pass hub cluster domain explicitly to avoid Helm template evaluation issues in ACM policies
-        - name: global.hubClusterDomain
-          value: '{{ .Values.global.hubClusterDomain }}'
     acm-managed-clusters:
       name: acm-managed-clusters
       project: hub
@@ -232,10 +229,24 @@ clusterGroup:
           # Image Discovery vault role (for production cluster credential retrieval from spoke cluster)
           # Note: No subject constraint - runs on spoke cluster with different trust domain
           # Relies on audience matching only for cross-cluster SPIFFE authentication
+          # subject is empty string to satisfy Ansible playbook, will not be used in Vault
           - name: image-discovery
             audience: vault
+            subject: ""
             policies:
               - global-secret
+      # Cross-cluster JWT auth mounts for spoke clusters
+      # Each spoke cluster gets its own JWT auth mount with its SPIRE OIDC provider
+      spokeClusters:
+        - name: dev
+          jwtMount: jwt-dev
+          oidcDiscoveryUrl: https://spire-spiffe-oidc-discovery-provider.apps.ztvp-dev.minzhang.edge-sro.rhecoeng.com
+          roles:
+            - name: image-discovery
+              audience: vault
+              subject: ""
+              policies:
+                - global-secret
     # Shared Object Storage Backend
     # Required for RHTPA (provides S3-compatible storage via NooBaa MCG)
     # NooBaa MCG provides S3-compatible object storage for multiple applications
@@ -343,6 +354,17 @@ clusterGroup:
       overrides:
         - name: spire.clusterName
           value: hub
+    # Vault spoke JWT configuration
+    # Configures JWT auth mounts for spoke clusters to authenticate to hub Vault
+    # Must run AFTER spoke clusters are deployed and have SPIRE running
+    # PostSync hook ensures it runs after all other resources are synced
+    vault-spoke-jwt-config:
+      name: vault-spoke-jwt-config
+      namespace: vault
+      project: hub
+      path: charts/vault-spoke-jwt-config
+      annotations:
+        argocd.argoproj.io/sync-wave: "20"  # Run after spoke clusters are deployed
     qtodo:
       name: qtodo
       namespace: qtodo

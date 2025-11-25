@@ -110,9 +110,12 @@ clusterGroup:
         - name: rhtpa.imageDiscovery.productionCluster.kubeconfigVaultPath
           value: "secret/data/hub/kubeconfig-ztvp-prod"
         
-        # Vault configuration (uses hub's Vault)
+        # Vault configuration (uses hub's Vault with spoke-specific JWT auth mount)
+        # Hub Vault has separate JWT mount (auth/jwt-dev) configured for dev's SPIRE OIDC provider
         - name: rhtpa.imageDiscovery.vault.url
           value: "https://vault.apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com"
+        - name: rhtpa.imageDiscovery.vault.authPath
+          value: "auth/jwt-dev"
         - name: rhtpa.imageDiscovery.vault.role
           value: "image-discovery"
         

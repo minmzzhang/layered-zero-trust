@@ -1,0 +1,16 @@
+global: {}
+
+vaultSpokeJwtConfig:
+  # Job configuration
+  job:
+    backoffLimit: 3
+    ttlSecondsAfterFinished: 300  # Clean up job after 5 minutes
+    
+  # Service account configuration
+  serviceAccount:
+    name: vault-spoke-jwt-config
+    
+  # Script configmap
+  scriptConfigMap:
+    name: vault-spoke-jwt-config-script
+

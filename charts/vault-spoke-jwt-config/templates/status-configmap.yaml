@@ -1,0 +1,18 @@
+{{- if .Values.global.pattern }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-spoke-jwt-ready
+  namespace: {{ .Values.global.pattern }}-hub
+  labels:
+    {{- include "vault-spoke-jwt-config.labels" . | nindent 4 }}
+    vault-spoke-jwt-status: "ready"
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+data:
+  status: "ready"
+  timestamp: "{{ now | date "2006-01-02T15:04:05Z07:00" }}"
+  message: "Vault spoke JWT authentication mounts have been configured"
+{{- end }}
+

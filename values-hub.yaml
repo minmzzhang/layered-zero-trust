@@ -380,7 +380,7 @@ clusterGroup:
           value: false
         # Hub cluster domain - passed from hub to spoke for cross-cluster operations
         - name: global.hubClusterDomain
-          value: "{{ .Values.global.hubClusterDomain }}"
+          value: apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com
         # Production cluster info for image discovery
         # Format: https://api.{clusterName}.{baseDomain}:6443
         # baseDomain is derived from hub's clusterDomain (e.g., apps.ztvp-hub.example.com -> example.com)
@@ -428,7 +428,7 @@ clusterGroup:
           value: false
         # Hub cluster domain - passed from hub to spoke for cross-cluster operations
         - name: global.hubClusterDomain
-          value: "{{ .Values.global.hubClusterDomain }}"
+          value: apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com
       clusterSelector:
         matchLabels:
           clusterGroup: production

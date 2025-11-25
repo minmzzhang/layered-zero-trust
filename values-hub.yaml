@@ -119,12 +119,16 @@ clusterGroup:
     #   annotations:
     #     argocd.argoproj.io/sync-wave: "-2"  # Install after Quay operator, before applications
     #   catalogSource: redhat-operators
-    # UNCOMMENT for RHTPA operator subscriptions
+    # RHTPA operator subscription
+    # Channel: stable-v1.1 provides latest 1.1.x patch updates
+    # Note: No direct upgrade path from 1.1.x to 2.x (requires fresh install)
     rhtpa-operator:
       name: rhtpa-operator
       namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
-      channel: stable
+      channel: stable-v1.1  # Use stable-v1.1 channel for 1.1.x updates
       catalogSource: redhat-operators
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5), before applications
   projects:
     - hub
   # Explicitly mention the cluster-state based overrides we plan to use for this pattern.

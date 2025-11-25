@@ -76,6 +76,8 @@ clusterGroup:
         # SYFT now deploys independently without requiring rhtpa.enabled
         - name: rhtpa.enabled
           value: false  # Don't deploy RHTPA components
+        - name: rhtpa.objectStorage.enabled
+          value: false  # No S3 storage needed on spoke (SYFT uses hub's RHTPA API)
         - name: rhtpa.syft.enabled
           value: true   # Enable SYFT scanner
         - name: rhtpa.syft.cronjob.enabled

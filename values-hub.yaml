@@ -199,13 +199,13 @@ clusterGroup:
         roles:
           - name: qtodo
             audience: qtodo
-            subject: "spiffe://apps.{{`{{ .Values.global.clusterDomain }}`}}/ns/qtodo/sa/qtodo"
+            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/qtodo/sa/qtodo"
             policies:
               - global-secret
           # UNCOMMENT for RHTAS vault role
           # - name: rhtas
           #   audience: rhtas
-          #   subject: "spiffe://apps.{{`{{ .Values.global.clusterDomain }}`}}/ns/trusted-artifact-signer/sa/*"
+          #   subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-artifact-signer/sa/*"
           #   policies:
           #     - global-secret
           # RHTPA vault role
@@ -213,19 +213,19 @@ clusterGroup:
           # Remove bound_subject in actual Vault configuration and rely on audience matching
           - name: rhtpa
             audience: rhtpa
-            subject: "spiffe://apps.{{`{{ .Values.global.clusterDomain }}`}}/ns/trusted-profile-analyzer/sa/rhtpa"
+            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/rhtpa"
             policies:
               - global-secret
           # SYFT vault role (for SBOM generation)
           - name: syft
             audience: syft
-            subject: "spiffe://apps.{{`{{ .Values.global.clusterDomain }}`}}/ns/trusted-profile-analyzer/sa/syft"
+            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/syft"
             policies:
               - global-secret
           # Image Discovery vault role (for production cluster credential retrieval)
           - name: image-discovery
             audience: vault
-            subject: "spiffe://apps.{{`{{ .Values.global.clusterDomain }}`}}/ns/trusted-profile-analyzer/sa/image-discovery"
+            subject: "spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/image-discovery"
             policies:
               - global-secret
     # Shared Object Storage Backend

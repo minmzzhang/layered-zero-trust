@@ -17,7 +17,6 @@ clusterGroup:
         targetNamespace: zero-trust-workload-identity-manager
         annotations:
           argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
-    - spire-system  # SPIRE agent for SPIFFE authentication to hub Vault
   subscriptions:
     openshift-pipelines:
       name: openshift-pipelines-operator-rh
@@ -46,9 +45,10 @@ clusterGroup:
     # SPIRE Agent for Zero Trust workload identity
     # Federates with hub SPIRE server for SPIFFE authentication to hub Vault
     # Required for automated credential retrieval in image-discovery job
+    # ZTWIM operator manages SPIRE resources in its own namespace
     zero-trust-workload-identity-manager:
       name: zero-trust-workload-identity-manager
-      namespace: spire-system
+      namespace: zero-trust-workload-identity-manager
       project: dev
       path: charts/zero-trust-workload-identity-manager
       annotations:

@@ -167,6 +167,9 @@ clusterGroup:
       overrides:
         - name: global.secretStore.backend
           value: none
+        # Pass hub cluster domain explicitly to avoid Helm template evaluation issues in ACM policies
+        - name: global.hubClusterDomain
+          value: '{{ .Values.global.hubClusterDomain }}'
     acm-managed-clusters:
       name: acm-managed-clusters
       project: hub
@@ -369,16 +372,17 @@ clusterGroup:
       name: devel
       # Namespaces to create on spoke cluster via ACM policy
       # Add namespaces needed by applications/policies before ArgoCD deploys
+      # Note: SPIRE resources are managed by ZTWIM operator in zero-trust-workload-identity-manager namespace
       spokeNamespaces:
         - golang-external-secrets
         - policies
         - trusted-profile-analyzer  # SYFT scanner
-        - zero-trust-workload-identity-manager  # ZTWIM operator
-        - spire-system  # SPIRE agent for federation
+        - zero-trust-workload-identity-manager  # ZTWIM operator (includes SPIRE agent)
       helmOverrides:
         - name: clusterGroup.isHubCluster
           value: false
         # Hub cluster domain - passed from hub to spoke for cross-cluster operations
+        # IMPORTANT: Use literal value, not Helm template - ACM policies can't evaluate templates
         - name: global.hubClusterDomain
           value: apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com
         # Production cluster info for image discovery
@@ -427,6 +431,7 @@ clusterGroup:
         - name: clusterGroup.isHubCluster
           value: false
         # Hub cluster domain - passed from hub to spoke for cross-cluster operations
+        # IMPORTANT: Use literal value, not Helm template - ACM policies can't evaluate templates
         - name: global.hubClusterDomain
           value: apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com
       clusterSelector:

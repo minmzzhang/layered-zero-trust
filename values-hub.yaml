@@ -366,6 +366,14 @@ clusterGroup:
       helmOverrides:
         - name: clusterGroup.isHubCluster
           value: false
+        # Hub cluster domain - passed from hub to spoke for cross-cluster operations
+        - name: global.hubClusterDomain
+          value: "{{ .Values.global.hubClusterDomain }}"
+        # Production cluster info for image discovery
+        # Format: https://api.{clusterName}.{baseDomain}:6443
+        # baseDomain is derived from hub's clusterDomain (e.g., apps.ztvp-hub.example.com -> example.com)
+        - name: global.productionClusterName
+          value: ztvp-prod
       clusterSelector:
         matchLabels:
           clusterGroup: devel
@@ -402,6 +410,9 @@ clusterGroup:
       helmOverrides:
         - name: clusterGroup.isHubCluster
           value: false
+        # Hub cluster domain - passed from hub to spoke for cross-cluster operations
+        - name: global.hubClusterDomain
+          value: "{{ .Values.global.hubClusterDomain }}"
       clusterSelector:
         matchLabels:
           clusterGroup: production

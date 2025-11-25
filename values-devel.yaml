@@ -94,10 +94,13 @@ clusterGroup:
         - name: rhtpa.imageDiscovery.enabled
           value: true
         
-        # Configure production cluster (ACM managed cluster: ztvp-prod)
+        # Configure production cluster (ACM managed cluster name from hub)
         # Credentials automatically retrieved from Vault via SPIFFE authentication
+        # Cluster info passed from hub via helmOverrides in managedClusterGroups
+        # Base domain extracted from hubClusterDomain (e.g., apps.ztvp-hub.example.com -> example.com)
+        # Constructs: https://api.{clusterName}.{baseDomain}:6443
         - name: rhtpa.imageDiscovery.productionCluster.url
-          value: "https://api.ztvp-prod.minzhang.edge-sro.rhecoeng.com:6443"
+          value: "https://api.{{ .Values.global.productionClusterName }}.{{ .Values.global.hubClusterDomain | regexReplaceAll \"^apps\\\\.[^.]+\\\\.\" \"\" }}:6443"
         - name: rhtpa.imageDiscovery.productionCluster.namespaces[0]
           value: "qtodo-production"  # Primary production application
         - name: rhtpa.imageDiscovery.productionCluster.namespaces[1]

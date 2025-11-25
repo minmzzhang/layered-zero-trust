@@ -514,14 +514,14 @@ acmManagedClusters:
     - name: ztvp-dev
       clusterGroup: devel
       labels:
-        cloud: AWS
-        vendor: OpenShift
+        cloud: auto-detect
+        vendor: auto-detect
         environment: development
       kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-dev
     - name: ztvp-prod
       clusterGroup: production
       labels:
-        cloud: AWS
-        vendor: OpenShift
+        cloud: auto-detect
+        vendor: auto-detect
         environment: production
       kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-prod

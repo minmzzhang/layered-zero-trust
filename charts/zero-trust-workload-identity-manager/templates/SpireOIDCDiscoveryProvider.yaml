@@ -1,4 +1,3 @@
-{{- if .Values.spire.server.enabled }}
 apiVersion: operator.openshift.io/v1alpha1
 kind: SpireOIDCDiscoveryProvider
 metadata:
@@ -8,4 +7,3 @@ spec:
   agentSocketName: {{ .Values.spire.oidcDiscoveryProvider.agentSocketName }}
   jwtIssuer: {{ include "zero-trust-workload-identity-manager.jwtIssuer" . }}
   managedRoute: {{ (.Values.spire.oidcDiscoveryProvider.ingress.operatorManaged | default false) | quote }}
-{{- end }}

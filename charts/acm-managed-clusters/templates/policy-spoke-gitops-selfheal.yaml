@@ -1,0 +1,207 @@
+{{- range .Values.clusterGroup.managedClusterGroups }}
+{{- $group := . }}
+---
+# Proactive policy: Manage selfHeal lifecycle
+# Phase 1: Disable selfHeal during initial bootstrap
+# Phase 2: Enable selfHeal after applications are healthy
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: {{ $group.name }}-gitops-selfheal-lifecycle-policy
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+spec:
+  remediationAction: inform  # Don't auto-enforce, let CronJob handle it
+  disabled: false
+  policy-templates:
+    # Create a CronJob that manages selfHeal lifecycle
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-selfheal-manager-sa-config
+        spec:
+          remediationAction: enforce
+          severity: low
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: selfheal-lifecycle-manager
+                  namespace: openshift-gitops
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-selfheal-manager-role-config
+        spec:
+          remediationAction: enforce
+          severity: low
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: Role
+                metadata:
+                  name: selfheal-lifecycle-manager
+                  namespace: openshift-gitops
+                rules:
+                  - apiGroups: ["argoproj.io"]
+                    resources: ["applications"]
+                    verbs: ["get", "list", "patch"]
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-selfheal-manager-rb-config
+        spec:
+          remediationAction: enforce
+          severity: low
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: selfheal-lifecycle-manager
+                  namespace: openshift-gitops
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: Role
+                  name: selfheal-lifecycle-manager
+                subjects:
+                  - kind: ServiceAccount
+                    name: selfheal-lifecycle-manager
+                    namespace: openshift-gitops
+    # CronJob that checks application health and enables selfHeal when ready
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-selfheal-manager-cronjob-config
+        spec:
+          remediationAction: enforce
+          severity: medium
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: batch/v1
+                kind: CronJob
+                metadata:
+                  name: selfheal-lifecycle-manager-{{ $group.name }}
+                  namespace: openshift-gitops
+                  labels:
+                    app: selfheal-lifecycle-manager
+                    clustergroup: {{ $group.name }}
+                spec:
+                  schedule: "*/5 * * * *"  # Run every 5 minutes
+                  successfulJobsHistoryLimit: 1
+                  failedJobsHistoryLimit: 1
+                  concurrencyPolicy: Forbid
+                  jobTemplate:
+                    spec:
+                      ttlSecondsAfterFinished: 300
+                      template:
+                        spec:
+                          serviceAccountName: selfheal-lifecycle-manager
+                          restartPolicy: OnFailure
+                          containers:
+                            - name: selfheal-manager
+                              image: registry.redhat.io/openshift4/ose-cli:latest
+                              command:
+                                - /bin/bash
+                                - -c
+                                - |
+                                  set -e
+                                  
+                                  APP_NAME="{{ $.Values.global.pattern }}-{{ $group.name }}"
+                                  NAMESPACE="openshift-gitops"
+                                  CHILD_NAMESPACE="{{ $.Values.global.pattern }}-{{ $group.name }}"
+                                  
+                                  echo "Checking selfHeal lifecycle for $APP_NAME"
+                                  
+                                  # Check if application exists
+                                  if ! oc get application $APP_NAME -n $NAMESPACE >/dev/null 2>&1; then
+                                    echo "Application not found yet, skipping"
+                                    exit 0
+                                  fi
+                                  
+                                  # Get current selfHeal status
+                                  CURRENT_SELFHEAL=$(oc get application $APP_NAME -n $NAMESPACE -o jsonpath='{.spec.syncPolicy.automated.selfHeal}' 2>/dev/null || echo "false")
+                                  
+                                  # Get sync status
+                                  SYNC_STATUS=$(oc get application $APP_NAME -n $NAMESPACE -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+                                  
+                                  # Count child applications
+                                  CHILD_COUNT=$(oc get applications -n $CHILD_NAMESPACE --no-headers 2>/dev/null | wc -l || echo "0")
+                                  
+                                  echo "Current state:"
+                                  echo "  selfHeal: $CURRENT_SELFHEAL"
+                                  echo "  Sync Status: $SYNC_STATUS"
+                                  echo "  Child Apps: $CHILD_COUNT"
+                                  
+                                  # If selfHeal is false and we have child applications, enable it
+                                  if [ "$CURRENT_SELFHEAL" = "false" ] && [ "$CHILD_COUNT" -gt 0 ]; then
+                                    echo "Child applications exist, enabling selfHeal..."
+                                    oc patch application $APP_NAME -n $NAMESPACE --type merge \
+                                      -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}'
+                                    echo "selfHeal enabled"
+                                  elif [ "$CURRENT_SELFHEAL" = "true" ]; then
+                                    echo "selfHeal already enabled, nothing to do"
+                                  else
+                                    echo "Child applications not ready yet, keeping selfHeal disabled"
+                                  fi
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ $group.name }}-gitops-selfheal-lifecycle-placement-binding
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+placementRef:
+  name: {{ $group.name }}-gitops-selfheal-lifecycle-placement
+  kind: PlacementRule
+  apiGroup: apps.open-cluster-management.io
+subjects:
+  - name: {{ $group.name }}-gitops-selfheal-lifecycle-policy
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: PlacementRule
+metadata:
+  name: {{ $group.name }}-gitops-selfheal-lifecycle-placement
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  clusterConditions:
+    - status: 'True'
+      type: ManagedClusterConditionAvailable
+  clusterSelector:
+    matchExpressions:
+    - key: local-cluster
+      operator: NotIn
+      values:
+      - "true"
+    matchLabels:
+      clusterGroup: {{ $group.name }}
+{{- end }}
+

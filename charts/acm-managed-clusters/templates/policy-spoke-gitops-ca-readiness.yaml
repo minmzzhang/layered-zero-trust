@@ -1,0 +1,101 @@
+{{- range .Values.clusterGroup.managedClusterGroups }}
+{{- $group := . }}
+---
+# Proactive policy: Ensure CA bundle is ready BEFORE GitOps/ArgoCD starts
+# This prevents the TLS certificate verification issue from occurring
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: {{ $group.name }}-gitops-ca-readiness-policy
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Step 1: Ensure trusted-ca-bundle ConfigMap exists with injection label
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-ca-bundle-exists-config
+        spec:
+          remediationAction: enforce
+          severity: high
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: trusted-ca-bundle
+                  namespace: openshift-gitops
+                  labels:
+                    config.openshift.io/inject-trusted-cabundle: "true"
+    # Step 2: Verify CA bundle is populated (musthave with data check)
+    # This ensures we don't proceed until OpenShift has injected the CA
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-ca-bundle-populated-config
+        spec:
+          remediationAction: inform  # Don't enforce, just check
+          severity: high
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            # This will only be Compliant when ca-bundle.crt exists and is non-empty
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: trusted-ca-bundle
+                  namespace: openshift-gitops
+                data:
+                  ca-bundle.crt: "?"  # ? means "must exist and be non-empty"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ $group.name }}-gitops-ca-readiness-placement-binding
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+placementRef:
+  name: {{ $group.name }}-gitops-ca-readiness-placement
+  kind: PlacementRule
+  apiGroup: apps.open-cluster-management.io
+subjects:
+  - name: {{ $group.name }}-gitops-ca-readiness-policy
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: PlacementRule
+metadata:
+  name: {{ $group.name }}-gitops-ca-readiness-placement
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  clusterConditions:
+    - status: 'True'
+      type: ManagedClusterConditionAvailable
+  clusterSelector:
+    matchExpressions:
+    - key: local-cluster
+      operator: NotIn
+      values:
+      - "true"
+    matchLabels:
+      clusterGroup: {{ $group.name }}
+{{- end }}
+

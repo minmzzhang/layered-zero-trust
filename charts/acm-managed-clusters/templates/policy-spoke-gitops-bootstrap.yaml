@@ -1,0 +1,363 @@
+{{- range .Values.clusterGroup.managedClusterGroups }}
+{{- $group := . }}
+---
+# Policy to handle fresh install bootstrap issues:
+# 1. Restart ArgoCD components after CA injection completes
+# 2. Temporarily disable selfHeal to allow application creation
+# 3. Re-enable selfHeal after bootstrap completes
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: {{ $group.name }}-gitops-bootstrap-policy
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Step 1: Create ServiceAccount for bootstrap job
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-gitops-bootstrap-sa-config
+        spec:
+          remediationAction: enforce
+          severity: low
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: gitops-bootstrap-helper
+                  namespace: openshift-gitops
+    # Step 2: Create Role with permissions to patch Applications and restart deployments
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-gitops-bootstrap-role-config
+        spec:
+          remediationAction: enforce
+          severity: low
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: Role
+                metadata:
+                  name: gitops-bootstrap-helper
+                  namespace: openshift-gitops
+                rules:
+                  - apiGroups: ["argoproj.io"]
+                    resources: ["applications"]
+                    verbs: ["get", "list", "patch", "update"]
+                  - apiGroups: ["apps"]
+                    resources: ["deployments", "statefulsets"]
+                    verbs: ["get", "list", "patch"]
+                  - apiGroups: ["apps"]
+                    resources: ["deployments/status", "statefulsets/status"]
+                    verbs: ["get"]
+                  - apiGroups: [""]
+                    resources: ["configmaps"]
+                    verbs: ["get", "list", "create", "update", "patch"]
+    # Step 3: Create RoleBinding
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-gitops-bootstrap-rb-config
+        spec:
+          remediationAction: enforce
+          severity: low
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: gitops-bootstrap-helper
+                  namespace: openshift-gitops
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: Role
+                  name: gitops-bootstrap-helper
+                subjects:
+                  - kind: ServiceAccount
+                    name: gitops-bootstrap-helper
+                    namespace: openshift-gitops
+    # Step 4: Create Job to handle bootstrap
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $group.name }}-gitops-bootstrap-job-config
+        spec:
+          remediationAction: enforce
+          severity: medium
+          namespaceSelector:
+            include:
+              - openshift-gitops
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: batch/v1
+                kind: Job
+                metadata:
+                  name: gitops-bootstrap-{{ $group.name }}
+                  namespace: openshift-gitops
+                  labels:
+                    app: gitops-bootstrap
+                    clustergroup: {{ $group.name }}
+                spec:
+                  backoffLimit: 3
+                  ttlSecondsAfterFinished: 600
+                  template:
+                    metadata:
+                      labels:
+                        app: gitops-bootstrap
+                    spec:
+                      serviceAccountName: gitops-bootstrap-helper
+                      restartPolicy: OnFailure
+                      containers:
+                        - name: bootstrap
+                          image: registry.redhat.io/openshift4/ose-cli:latest
+                          command:
+                            - /bin/bash
+                            - -c
+                            - |
+                              set -e
+                              set -o pipefail
+                              
+                              APP_NAME="{{ $.Values.global.pattern }}-{{ $group.name }}"
+                              NAMESPACE="openshift-gitops"
+                              
+                              echo "=========================================="
+                              echo "ArgoCD Fresh Install Bootstrap Helper (FALLBACK)"
+                              echo "Cluster Group: {{ $group.name }}"
+                              echo "Application: $APP_NAME"
+                              echo "=========================================="
+                              echo ""
+                              echo "NOTE: This job only runs if proactive policies failed to prevent issues."
+                              echo "Check CA readiness and selfHeal lifecycle policies for root cause."
+                              echo ""
+                              
+                              # Step 0: Check if we even need to run (proactive policies may have handled it)
+                              echo "STEP 0: Checking if bootstrap is needed..."
+                              
+                              # Check if application exists and has child apps
+                              if oc get application $APP_NAME -n $NAMESPACE >/dev/null 2>&1; then
+                                CHILD_COUNT=$(oc get applications -n {{ $.Values.global.pattern }}-{{ $group.name }} --no-headers 2>/dev/null | wc -l || echo "0")
+                                SYNC_STATUS=$(oc get application $APP_NAME -n $NAMESPACE -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+                                
+                                echo "  Current state:"
+                                echo "    Application exists: YES"
+                                echo "    Sync status: $SYNC_STATUS"
+                                echo "    Child applications: $CHILD_COUNT"
+                                
+                                if [ "$CHILD_COUNT" -gt 0 ] && [ "$SYNC_STATUS" != "Unknown" ]; then
+                                  echo ""
+                                  echo "Bootstrap not needed - proactive policies succeeded!"
+                                  echo "Creating completion marker and exiting..."
+                                  
+                                  oc create configmap gitops-bootstrap-{{ $group.name }}-complete \
+                                    -n $NAMESPACE \
+                                    --from-literal=status=skipped \
+                                    --from-literal=reason="proactive-policies-succeeded" \
+                                    --from-literal=timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                                    --dry-run=client -o yaml | oc apply -f -
+                                  
+                                  exit 0
+                                fi
+                                
+                                echo ""
+                                echo "Issues detected - proceeding with bootstrap recovery..."
+                              else
+                                echo "  Application not found yet, will wait for it..."
+                              fi
+                              
+                              # Step 1: Wait for CA bundle injection to complete
+                              echo ""
+                              echo "STEP 1: Waiting for CA bundle injection..."
+                              MAX_RETRIES=60
+                              RETRY_COUNT=0
+                              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                                if oc get configmap trusted-ca-bundle -n $NAMESPACE >/dev/null 2>&1; then
+                                  if [ -n "$(oc get configmap trusted-ca-bundle -n $NAMESPACE -o jsonpath='{.data.ca-bundle\.crt}')" ]; then
+                                    echo "  CA bundle is populated"
+                                    break
+                                  fi
+                                fi
+                                echo "  Waiting for CA bundle... ($RETRY_COUNT/$MAX_RETRIES)"
+                                sleep 5
+                                RETRY_COUNT=$((RETRY_COUNT + 1))
+                              done
+                              
+                              if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                                echo "WARNING: Timed out waiting for CA bundle, proceeding anyway"
+                              fi
+                              
+                              # Step 2: Restart ArgoCD components to pick up CA bundle
+                              echo ""
+                              echo "STEP 2: Restarting ArgoCD components..."
+                              
+                              echo "  Restarting repo-server..."
+                              oc rollout restart deployment/openshift-gitops-repo-server -n $NAMESPACE
+                              oc rollout status deployment/openshift-gitops-repo-server -n $NAMESPACE --timeout=120s
+                              
+                              echo "  Restarting application-controller..."
+                              oc rollout restart statefulset/openshift-gitops-application-controller -n $NAMESPACE
+                              oc rollout status statefulset/openshift-gitops-application-controller -n $NAMESPACE --timeout=120s
+                              
+                              echo "  ArgoCD components restarted successfully"
+                              
+                              # Step 3: Wait for Application to exist
+                              echo ""
+                              echo "STEP 3: Waiting for Application to be created..."
+                              RETRY_COUNT=0
+                              while [ $RETRY_COUNT -lt 60 ]; do
+                                if oc get application $APP_NAME -n $NAMESPACE >/dev/null 2>&1; then
+                                  echo "  Application found"
+                                  break
+                                fi
+                                echo "  Waiting for Application... ($RETRY_COUNT/60)"
+                                sleep 5
+                                RETRY_COUNT=$((RETRY_COUNT + 1))
+                              done
+                              
+                              if [ $RETRY_COUNT -eq 60 ]; then
+                                echo "ERROR: Application $APP_NAME not found after 5 minutes"
+                                exit 1
+                              fi
+                              
+                              # Step 4: Check current selfHeal status
+                              echo ""
+                              echo "STEP 4: Checking selfHeal status..."
+                              CURRENT_SELFHEAL=$(oc get application $APP_NAME -n $NAMESPACE -o jsonpath='{.spec.syncPolicy.automated.selfHeal}' 2>/dev/null || echo "false")
+                              echo "  Current selfHeal: $CURRENT_SELFHEAL"
+                              
+                              # Step 5: If selfHeal is enabled, temporarily disable it
+                              if [ "$CURRENT_SELFHEAL" = "true" ]; then
+                                echo ""
+                                echo "STEP 5: Temporarily disabling selfHeal..."
+                                oc patch application $APP_NAME -n $NAMESPACE --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
+                                echo "  selfHeal disabled"
+                                
+                                # Wait a bit for the patch to take effect
+                                sleep 5
+                              else
+                                echo ""
+                                echo "STEP 5: selfHeal already disabled, skipping"
+                              fi
+                              
+                              # Step 6: Trigger a sync
+                              echo ""
+                              echo "STEP 6: Triggering application sync..."
+                              oc patch application $APP_NAME -n $NAMESPACE --type merge -p "{\"operation\":{\"initiatedBy\":{\"username\":\"bootstrap-helper\"},\"sync\":{}}}"
+                              
+                              # Wait for sync to complete
+                              echo "  Waiting for sync operation to complete..."
+                              RETRY_COUNT=0
+                              while [ $RETRY_COUNT -lt 60 ]; do
+                                SYNC_STATUS=$(oc get application $APP_NAME -n $NAMESPACE -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "")
+                                if [ "$SYNC_STATUS" = "Succeeded" ]; then
+                                  echo "  Sync completed successfully"
+                                  break
+                                elif [ "$SYNC_STATUS" = "Error" ] || [ "$SYNC_STATUS" = "Failed" ]; then
+                                  echo "  Sync operation status: $SYNC_STATUS"
+                                  echo "  Continuing anyway - child applications may still be created"
+                                  break
+                                fi
+                                echo "  Sync operation status: $SYNC_STATUS ($RETRY_COUNT/60)"
+                                sleep 5
+                                RETRY_COUNT=$((RETRY_COUNT + 1))
+                              done
+                              
+                              # Step 7: Wait for child applications to be created
+                              echo ""
+                              echo "STEP 7: Waiting for child applications to be created..."
+                              sleep 20
+                              
+                              CHILD_COUNT=$(oc get applications -n {{ $.Values.global.pattern }}-{{ $group.name }} --no-headers 2>/dev/null | wc -l)
+                              echo "  Found $CHILD_COUNT child applications"
+                              
+                              if [ $CHILD_COUNT -gt 0 ]; then
+                                echo "  Child applications created successfully"
+                              else
+                                echo "  WARNING: No child applications found yet"
+                              fi
+                              
+                              # Step 8: Re-enable selfHeal if it was originally enabled
+                              if [ "$CURRENT_SELFHEAL" = "true" ]; then
+                                echo ""
+                                echo "STEP 8: Re-enabling selfHeal..."
+                                oc patch application $APP_NAME -n $NAMESPACE --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}'
+                                echo "  selfHeal re-enabled"
+                              else
+                                echo ""
+                                echo "STEP 8: Keeping selfHeal disabled as it was originally"
+                              fi
+                              
+                              # Step 9: Create completion marker
+                              echo ""
+                              echo "STEP 9: Creating bootstrap completion marker..."
+                              oc create configmap gitops-bootstrap-{{ $group.name }}-complete \
+                                -n $NAMESPACE \
+                                --from-literal=status=complete \
+                                --from-literal=timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                                --dry-run=client -o yaml | oc apply -f -
+                              
+                              echo ""
+                              echo "=========================================="
+                              echo "Bootstrap completed successfully!"
+                              echo "=========================================="
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ $group.name }}-gitops-bootstrap-placement-binding
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+placementRef:
+  name: {{ $group.name }}-gitops-bootstrap-placement
+  kind: PlacementRule
+  apiGroup: apps.open-cluster-management.io
+subjects:
+  - name: {{ $group.name }}-gitops-bootstrap-policy
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: PlacementRule
+metadata:
+  name: {{ $group.name }}-gitops-bootstrap-placement
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  clusterConditions:
+    - status: 'True'
+      type: ManagedClusterConditionAvailable
+  clusterSelector:
+    matchExpressions:
+    - key: local-cluster
+      operator: NotIn
+      values:
+      - "true"
+    matchLabels:
+      clusterGroup: {{ $group.name }}
+{{- end }}
+

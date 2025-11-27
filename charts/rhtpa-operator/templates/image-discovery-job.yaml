@@ -106,7 +106,7 @@ spec:
           # Option 4: Wait for ACM policy to distribute vault-spoke-jwt-ready
           # ====================================================================
           echo "Checking Vault spoke JWT configuration readiness..."
-          SPOKE_NAMESPACE="{{ .Values.global.pattern }}-{{ .Values.clusterGroup.name }}"
+          SPOKE_NAMESPACE="{{ .Values.rhtpa.imageDiscovery.spokeNamespace | default (printf "%s-%s" .Values.global.pattern (.Values.clusterGroup.name | default "devel")) }}"
           VAULT_JWT_READY=false
           
           echo "Attempting Option 4: Waiting for ACM policy distribution..."

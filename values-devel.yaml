@@ -124,5 +124,9 @@ clusterGroup:
           value: "https://keycloak.apps.ztvp-hub.minzhang.edge-sro.rhecoeng.com"
         - name: rhtpa.zeroTrust.keycloak.realm
           value: "ztvp"
+        
+        # Spoke namespace for vault JWT status ConfigMap (required for image-discovery dependency check)
+        - name: rhtpa.imageDiscovery.spokeNamespace
+          value: "layered-zero-trust-devel"
   sharedValueFiles:
     - '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml'

@@ -156,16 +156,19 @@ spec:
                                   echo "  Sync Status: $SYNC_STATUS"
                                   echo "  Child Apps: $CHILD_COUNT"
                                   
-                                  # If selfHeal is false and we have child applications, enable it
-                                  if [ "$CURRENT_SELFHEAL" = "false" ] && [ "$CHILD_COUNT" -gt 0 ]; then
-                                    echo "Child applications exist, enabling selfHeal..."
+                                  # Manage selfHeal based on child application existence
+                                  if [ "$CHILD_COUNT" -eq 0 ] && [ "$CURRENT_SELFHEAL" = "true" ]; then
+                                    echo "No child applications yet, disabling selfHeal to allow creation..."
+                                    oc patch application $APP_NAME -n $NAMESPACE --type merge \
+                                      -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
+                                    echo "selfHeal disabled - app can now create child applications"
+                                  elif [ "$CHILD_COUNT" -gt 0 ] && [ "$CURRENT_SELFHEAL" = "false" ]; then
+                                    echo "Child applications exist, enabling selfHeal for continuous reconciliation..."
                                     oc patch application $APP_NAME -n $NAMESPACE --type merge \
                                       -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}'
                                     echo "selfHeal enabled"
-                                  elif [ "$CURRENT_SELFHEAL" = "true" ]; then
-                                    echo "selfHeal already enabled, nothing to do"
                                   else
-                                    echo "Child applications not ready yet, keeping selfHeal disabled"
+                                    echo "selfHeal state is correct (selfHeal=$CURRENT_SELFHEAL, children=$CHILD_COUNT)"
                                   fi
 ---
 apiVersion: policy.open-cluster-management.io/v1

@@ -106,7 +106,11 @@ spec:
           # Option 4: Wait for ACM policy to distribute vault-spoke-jwt-ready
           # ====================================================================
           echo "Checking Vault spoke JWT configuration readiness..."
-          SPOKE_NAMESPACE="{{ .Values.rhtpa.imageDiscovery.spokeNamespace | default (printf "%s-%s" .Values.global.pattern (.Values.clusterGroup.name | default "devel")) }}"
+          # The vault-spoke-jwt-ready ConfigMap is created by ACM policy in the
+          # ArgoCD application namespace (e.g., layered-zero-trust-devel)
+          # NOT in the component deployment namespace (e.g., trusted-profile-analyzer)
+          # This must be explicitly configured via rhtpa.imageDiscovery.spokeNamespace
+          SPOKE_NAMESPACE="{{ .Values.rhtpa.imageDiscovery.spokeNamespace | required "rhtpa.imageDiscovery.spokeNamespace is required for cross-cluster image discovery" }}"
           VAULT_JWT_READY=false
           
           echo "Attempting Option 4: Waiting for ACM policy distribution..."

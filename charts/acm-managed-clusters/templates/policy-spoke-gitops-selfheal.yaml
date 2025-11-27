@@ -13,7 +13,7 @@ metadata:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
     argocd.argoproj.io/compare-options: IgnoreExtraneous
 spec:
-  remediationAction: inform  # Don't auto-enforce, let CronJob handle it
+  remediationAction: enforce  # Enforce creation of CronJob and related resources
   disabled: false
   policy-templates:
     # Create a CronJob that manages selfHeal lifecycle

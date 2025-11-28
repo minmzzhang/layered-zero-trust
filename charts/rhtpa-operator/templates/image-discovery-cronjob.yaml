@@ -84,6 +84,7 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      ttlSecondsAfterFinished: 600  # Auto-delete completed jobs after 10 minutes
       template:
         metadata:
           labels:

@@ -28,13 +28,12 @@ clusterGroup:
         targetNamespace: cert-manager-operator
     # Layer 1: Storage and Registry
     # Required for RHTPA (provides NooBaa object storage backend)
-    # COMMENTED OUT for Quay: Uncomment to also enable Quay registry
-    # - openshift-storage:
-    #     operatorGroup: true
-    #     targetNamespace: openshift-storage
-    #     annotations:
-    #       openshift.io/cluster-monitoring: "true"
-    #       argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
+    - openshift-storage:
+        operatorGroup: true
+        targetNamespace: openshift-storage
+        annotations:
+          openshift.io/cluster-monitoring: "true"
+          argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
     # - quay-enterprise:
     #     annotations:
     #       argocd.argoproj.io/sync-wave: "1"  # Create before NooBaa and all Quay components
@@ -47,17 +46,17 @@ clusterGroup:
     #       argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
     #     labels:
     #       openshift.io/cluster-monitoring: "true"
-    # UNCOMMENT if you want to deploy RHTPA
-    # - rhtpa-operator:
-    #     operatorGroup: true
-    #     targetNamespace: rhtpa-operator
-    #     annotations:
-    #       argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
-    # - trusted-profile-analyzer:
-    #     annotations:
-    #       argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
-    #     labels:
-    #       openshift.io/cluster-monitoring: "true"
+    # RHTPA namespaces (ENABLED)
+    - rhtpa-operator:
+        operatorGroup: true
+        targetNamespace: rhtpa-operator
+        annotations:
+          argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
+    - trusted-profile-analyzer:
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
+        labels:
+          openshift.io/cluster-monitoring: "true"
     - zero-trust-workload-identity-manager:
         operatorGroup: true
         targetNamespace: zero-trust-workload-identity-manager
@@ -98,13 +97,12 @@ clusterGroup:
     # Storage and Registry operator subscriptions
     # Required for RHTPA (provides NooBaa object storage backend)
     # ODF provides object storage backend (NooBaa) for RHTPA and optionally Quay
-    # COMMENTED OUT - Uncomment to enable ODF
-    # odf:
-    #   name: odf-operator
-    #   namespace: openshift-storage
-    #   channel: stable-4.19
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5)
+    odf:
+      name: odf-operator
+      namespace: openshift-storage
+      channel: stable-4.19
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5)
     # quay-operator:
     #   name: quay-operator
     #   namespace: openshift-operators
@@ -120,17 +118,16 @@ clusterGroup:
     #   annotations:
     #     argocd.argoproj.io/sync-wave: "-2"  # Install after Quay operator, before applications
     #   catalogSource: redhat-operators
-    # RHTPA operator subscription
+    # RHTPA operator subscription (ENABLED)
     # Channel: stable-v1.1 provides latest 1.1.x patch updates
     # Note: No direct upgrade path from 1.1.x to 2.x (requires fresh install)
-    # COMMENTED OUT - Uncomment to enable RHTPA operator
-    # rhtpa-operator:
-    #   name: rhtpa-operator
-    #   namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
-    #   channel: stable-v1.1  # Use stable-v1.1 channel for 1.1.x updates
-    #   catalogSource: redhat-operators
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5), before applications
+    rhtpa-operator:
+      name: rhtpa-operator
+      namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
+      channel: stable-v1.1  # Use stable-v1.1 channel for 1.1.x updates
+      catalogSource: redhat-operators
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5), before applications
   projects:
     - hub
   # Explicitly mention the cluster-state based overrides we plan to use for this pattern.
@@ -212,14 +209,13 @@ clusterGroup:
     # Shared Object Storage Backend
     # Required for RHTPA (provides S3-compatible storage via NooBaa MCG)
     # NooBaa MCG provides S3-compatible object storage for multiple applications
-    # COMMENTED OUT - Uncomment to enable NooBaa
-    # noobaa-mcg:
-    #   name: noobaa-mcg
-    #   namespace: openshift-storage
-    #   project: hub
-    #   path: charts/noobaa-mcg
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "5"  # Deploy after core services
+    noobaa-mcg:
+      name: noobaa-mcg
+      namespace: openshift-storage
+      project: hub
+      path: charts/noobaa-mcg
+      annotations:
+        argocd.argoproj.io/sync-wave: "5"  # Deploy after core services
     # Quay Container Registry (uses NooBaa for storage)
     # quay-registry:
     #   name: quay-registry
@@ -254,67 +250,66 @@ clusterGroup:
     #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}/realms/ztvp
     # RHTPA (Red Hat Trusted Profile Analyzer) with SPIFFE Integration
     # Depends on: NooBaa MCG (storage), Vault (secrets), SPIRE (identity), Keycloak (auth)
-    # COMMENTED OUT - Uncomment to enable RHTPA
-    # trusted-profile-analyzer:
-    #   name: trusted-profile-analyzer
-    #   namespace: trusted-profile-analyzer
-    #   project: hub
-    #   path: charts/rhtpa-operator
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa and dependencies
-    #   # Ignore differences to prevent OutOfSync status
-    #   ignoreDifferences:
-    #     # Ignore ConfigMap data changes from OpenShift service CA injection
-    #     - kind: ConfigMap
-    #       name: syft-service-ca
-    #       jsonPointers:
-    #         - /data
-    #     # Ignore Job status changes (completion, failure counts, conditions)
-    #     # Jobs are created by hooks and their status changes don't require re-sync
-    #     - group: batch
-    #       kind: Job
-    #       jsonPointers:
-    #         - /status
-    #   overrides:
-    #     - name: rhtpa.zeroTrust.spire.trustDomain
-    #       value: apps.{{ $.Values.global.clusterDomain }}
-    #     - name: rhtpa.zeroTrust.vault.url
-    #       value: https://vault.vault.svc.cluster.local:8200
-    #     - name: rhtpa.zeroTrust.keycloak.url
-    #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}
-    #     # SYFT SBOM Generator - ENABLED on Hub for Hub-only architecture
-    #     - name: rhtpa.syft.enabled
-    #       value: true
-    #     # RHTPA API URL - use internal service DNS
-    #     # The TPA operator creates a service named 'server' on port 443 (HTTPS)
-    #     - name: rhtpa.syft.apiUrl
-    #       value: "https://server.trusted-profile-analyzer.svc.cluster.local"
-    #     # SYFT Job health check timeout (seconds) - maximum wait for RHTPA server readiness
-    #     # The job will proceed as soon as the server is ready 
-    #     - name: rhtpa.syft.scanner.healthCheckTimeout
-    #       value: "60"
-    #     # Enable suspended CronJob for manual triggering (no automatic schedule)
-    #     - name: rhtpa.syft.scanner.enabled
-    #       value: true
-    #     - name: rhtpa.syft.scanner.suspend
-    #       value: true
-    #     # Image Discovery - Automatically discover images from production namespaces
-    #     # When enabled, dynamically discovered images are COMBINED with static images below
-    #     # Runs a local discovery job to find images running on the hub cluster
-    #     - name: rhtpa.localImageDiscovery.enabled
-    #       value: true
-    #     # SYFT Images to Scan (Static List)
-    #     # We use a comma-separated string override to avoid ArgoCD "Fresh Install OutOfSync"
-    #     # issues caused by complex array overrides.
-    #     # Note: registry.redhat.io requires authentication - removed for now
-    #     - name: rhtpa.syft.images
-    #       value: "quay.io/validatedpatterns/qtodo:latest,docker.io/library/nginx:latest"
-    #     # Importer Period Configuration
-    #     # Supported formats: 15m, 30m, 1h, 6h, 12h, 1d
-    #     - name: rhtpa.modules.createImporters.importers.cve.cve.period
-    #       value: "1d"  # CVE importer period: 1 day
-    #     - name: rhtpa.modules.createImporters.importers.osv-github.osv.period
-    #       value: "1d"  # OSV-GitHub importer period: 1 day
+    trusted-profile-analyzer:
+      name: trusted-profile-analyzer
+      namespace: trusted-profile-analyzer
+      project: hub
+      path: charts/rhtpa-operator
+      annotations:
+        argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa and dependencies
+      # Ignore differences to prevent OutOfSync status
+      ignoreDifferences:
+        # Ignore ConfigMap data changes from OpenShift service CA injection
+        - kind: ConfigMap
+          name: syft-service-ca
+          jsonPointers:
+            - /data
+        # Ignore Job status changes (completion, failure counts, conditions)
+        # Jobs are created by hooks and their status changes don't require re-sync
+        - group: batch
+          kind: Job
+          jsonPointers:
+            - /status
+      overrides:
+        - name: rhtpa.zeroTrust.spire.trustDomain
+          value: apps.{{ $.Values.global.clusterDomain }}
+        - name: rhtpa.zeroTrust.vault.url
+          value: https://vault.vault.svc.cluster.local:8200
+        - name: rhtpa.zeroTrust.keycloak.url
+          value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}
+        # SYFT SBOM Generator - ENABLED on Hub for Hub-only architecture
+        - name: rhtpa.syft.enabled
+          value: true
+        # RHTPA API URL - use internal service DNS
+        # The TPA operator creates a service named 'server' on port 443 (HTTPS)
+        - name: rhtpa.syft.apiUrl
+          value: "https://server.trusted-profile-analyzer.svc.cluster.local"
+        # SYFT Job health check timeout (seconds) - maximum wait for RHTPA server readiness
+        # The job will proceed as soon as the server is ready 
+        - name: rhtpa.syft.scanner.healthCheckTimeout
+          value: "60"
+        # Enable suspended CronJob for manual triggering (no automatic schedule)
+        - name: rhtpa.syft.scanner.enabled
+          value: true
+        - name: rhtpa.syft.scanner.suspend
+          value: true
+        # Image Discovery - Automatically discover images from production namespaces
+        # When enabled, dynamically discovered images are COMBINED with static images below
+        # Runs a local discovery job to find images running on the hub cluster
+        - name: rhtpa.localImageDiscovery.enabled
+          value: true
+        # SYFT Images to Scan (Static List)
+        # We use a comma-separated string override to avoid ArgoCD "Fresh Install OutOfSync"
+        # issues caused by complex array overrides.
+        # Note: registry.redhat.io requires authentication - removed for now
+        - name: rhtpa.syft.images
+          value: "quay.io/validatedpatterns/qtodo:latest,docker.io/library/nginx:latest"
+        # Importer Period Configuration
+        # Supported formats: 15m, 30m, 1h, 6h, 12h, 1d
+        - name: rhtpa.modules.createImporters.importers.cve.cve.period
+          value: "1d"  # CVE importer period: 1 day
+        - name: rhtpa.modules.createImporters.importers.osv-github.osv.period
+          value: "1d"  # OSV-GitHub importer period: 1 day
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets
@@ -364,35 +359,36 @@ clusterGroup:
     # For additional overrides that apply to the jobs, please refer to
     # https://hybrid-cloud-patterns.io/imperative-actions/#additional-job-customizations
     jobs: []
-  managedClusterGroups: {}
-  # This configuration can be used for Pipeline/DevSecOps (UC-01 / UC-02)
-  #  devel:
-  #    name: devel
-  #    helmOverrides:
-  #      - name: clusterGroup.isHubCluster
-  #        value: false
-  #    clusterSelector:
-  #      matchLabels:
-  #        clusterGroup: devel
-  #      matchExpressions:
-  #        - key: vendor
-  #          operator: In
-  #          values:
-  #            - OpenShift
-  #  production:
-  #    name: production
-  #    helmOverrides:
-  #      - name: clusterGroup.isHubCluster
-  #        value: false
-  #    clusterSelector:
-  #      matchLabels:
-  #        clusterGroup: production
-  #      matchExpressions:
-  #        - key: vendor
-  #          operator: In
-  #          values:
-  #            - OpenShift
-  # End of Pipeline/DevSecOps configuration
+  managedClusterGroups:
+    # Pipeline/DevSecOps configuration (UC-01 / UC-02)
+    # COMMENTED OUT: Uncomment to enable devel cluster
+    # devel:
+    #   name: devel
+    #   helmOverrides:
+    #     - name: clusterGroup.isHubCluster
+    #       value: false
+    #   clusterSelector:
+    #     matchLabels:
+    #       clusterGroup: devel
+    #     matchExpressions:
+    #       - key: vendor
+    #         operator: In
+    #         values:
+    #           - OpenShift
+    # Production cluster configuration (ENABLED)
+    production:
+      name: production
+      helmOverrides:
+        - name: clusterGroup.isHubCluster
+          value: false
+      clusterSelector:
+        matchLabels:
+          clusterGroup: production
+        matchExpressions:
+          - key: vendor
+            operator: In
+            values:
+              - OpenShift
 
     # exampleRegion:
     #   name: group-one
@@ -455,18 +451,20 @@ clusterGroup:
 
 # List of previously provisioned clusters to import and manage from the Hub cluster
 acmManagedClusters:
-  clusters: []
-  # This configuration can be used for Pipeline/DevSecOps (UC-01 / UC-02)
-  #  - name: ztvp-spoke-1
-  #    clusterGroup: devel
-  #    labels:
-  #      cloud: auto-detect
-  #      vendor: auto-detect
-  #    kubeconfigVaultPath: secret/data/hub/kubeconfig-spoke-1
-  #  - name: ztvp-spoke-2
-  #    clusterGroup: production
-  #    labels:
-  #      cloud: auto-detect
-  #      vendor: auto-detect
-  #    kubeconfigVaultPath: secret/data/hub/kubeconfig-spoke-2
+  clusters:
+    # Pipeline/DevSecOps configuration (UC-01 / UC-02)
+    # COMMENTED OUT: Uncomment to enable devel cluster
+    # - name: ztvp-dev
+    #   clusterGroup: devel
+    #   labels:
+    #     cloud: auto-detect
+    #     vendor: auto-detect
+    #   kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-dev
+    # Production cluster configuration (ENABLED)
+    - name: ztvp-prod
+      clusterGroup: production
+      labels:
+        cloud: auto-detect
+        vendor: auto-detect
+      kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-prod
 

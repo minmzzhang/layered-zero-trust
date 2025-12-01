@@ -1,0 +1,30 @@
+global:
+  options:
+    useCSV: False
+    syncPolicy: Automatic
+    installPlanApproval: Automatic
+
+clusterGroup:
+  name: production
+  isHubCluster: false
+  namespaces:
+    - golang-external-secrets
+    - policies
+    - openshift-pipelines
+  subscriptions:
+    openshift-pipelines:
+      name: openshift-pipelines-operator-rh
+      namespace: openshift-operators
+  projects:
+    - prod
+    - eso
+  applications:
+    golang-external-secrets:
+      name: golang-external-secrets
+      namespace: golang-external-secrets
+      project: eso
+      chart: golang-external-secrets
+      chartVersion: 0.1.*
+  sharedValueFiles:
+    - '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml'
+

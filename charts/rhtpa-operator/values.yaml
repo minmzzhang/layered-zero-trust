@@ -211,6 +211,33 @@ rhtpa:
       include: []
       #  - "quay.io/myorg"
       #  - "registry.mycompany.com"
+  
+  # Remote Cluster Image Discovery
+  # Discovers images from remote managed clusters (production, dev, staging, etc.)
+  # Hub cluster images are discovered separately by localImageDiscovery
+  # Enables centralized SBOM scanning of images across the entire fleet
+  remoteClusterImageDiscovery:
+    enabled: false  # Set to true to enable remote cluster image discovery
+    image: "registry.redhat.io/openshift4/ose-cli:latest"
+    schedule: "0 * * * *"  # Every hour
+    suspend: false  # Set to true to manually trigger only
+    
+    # Remote clusters to discover images from
+    remoteClusters: []
+    #  - name: production
+    #    kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-prod
+    #  - name: devel
+    #    kubeconfigVaultPath: secret/data/hub/kubeconfig-ztvp-dev
+    
+    # Image filters (applied to all remote clusters)
+    filters:
+      exclude:
+        - "k8s.gcr.io"
+        - "gcr.io/google"
+        - "quay.io/openshift"
+        - "registry.redhat.io/openshift"
+        - "registry.connect.redhat.com"
+      include: []
 
 # Global Configuration
 global:

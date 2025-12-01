@@ -1,0 +1,206 @@
+{{- if .Values.rhtpa.remoteClusterImageDiscovery.enabled }}
+---
+# Service Account for Remote Cluster Image Discovery
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: remote-cluster-image-discovery
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+---
+# ClusterRole to list pods in all namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: remote-cluster-image-discovery-reader
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+# Role to manage ConfigMaps in the namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: remote-cluster-image-discovery-configmap
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+# Bind ClusterRole to ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: remote-cluster-image-discovery-reader
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+subjects:
+  - kind: ServiceAccount
+    name: remote-cluster-image-discovery
+    namespace: {{ .Values.rhtpa.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: remote-cluster-image-discovery-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+# Bind Role to ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: remote-cluster-image-discovery-configmap
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+subjects:
+  - kind: ServiceAccount
+    name: remote-cluster-image-discovery
+    namespace: {{ .Values.rhtpa.namespace }}
+roleRef:
+  kind: Role
+  name: remote-cluster-image-discovery-configmap
+  apiGroup: rbac.authorization.k8s.io
+---
+# External Secret to fetch remote cluster kubeconfigs from Vault
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: remote-cluster-kubeconfigs
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  refreshInterval: 15m
+  secretStoreRef:
+    name: {{ .Values.global.secretStore.name }}
+    kind: {{ .Values.global.secretStore.kind }}
+  target:
+    name: remote-cluster-kubeconfigs
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        {{- range .Values.rhtpa.remoteClusterImageDiscovery.remoteClusters }}
+        {{ .name }}-kubeconfig: |
+          {{ printf "{{ .%s | toString }}" .name }}
+        {{- end }}
+  dataFrom:
+    {{- range .Values.rhtpa.remoteClusterImageDiscovery.remoteClusters }}
+    - extract:
+        key: {{ .kubeconfigVaultPath }}
+      rewrite:
+        - regexp:
+            source: "content"
+            target: {{ .name | quote }}
+    {{- end }}
+---
+# CronJob to discover images from remote clusters
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: discover-remote-cluster-images
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+spec:
+  schedule: {{ .Values.rhtpa.remoteClusterImageDiscovery.schedule | quote }}
+  suspend: {{ .Values.rhtpa.remoteClusterImageDiscovery.suspend }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app: remote-cluster-image-discovery
+        spec:
+          serviceAccountName: remote-cluster-image-discovery
+          restartPolicy: OnFailure
+          volumes:
+            - name: kubeconfigs
+              secret:
+                secretName: remote-cluster-kubeconfigs
+          containers:
+            - name: discovery
+              image: {{ .Values.rhtpa.remoteClusterImageDiscovery.image }}
+              volumeMounts:
+                - name: kubeconfigs
+                  mountPath: /kubeconfigs
+                  readOnly: true
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  echo "Starting remote cluster image discovery..."
+                  
+                  # Initialize combined images file
+                  echo -n "" > /tmp/all_cluster_images.txt
+                  
+                  {{- range .Values.rhtpa.remoteClusterImageDiscovery.remoteClusters }}
+                  # Discover images from {{ .name }} cluster
+                  echo "=== Discovering images from {{ .name | upper }} cluster ==="
+                  if [ -f "/kubeconfigs/{{ .name }}-kubeconfig" ]; then
+                    export KUBECONFIG=/kubeconfigs/{{ .name }}-kubeconfig
+                    oc get pods -A -o jsonpath='{range .items[*]}{.spec.containers[*].image}{"\n"}{.spec.initContainers[*].image}{"\n"}{end}' \
+                      | sort | uniq >> /tmp/all_cluster_images.txt || echo "WARNING: Failed to get images from {{ .name }}"
+                  else
+                    echo "ERROR: Kubeconfig for {{ .name }} not found"
+                  fi
+                  {{- end }}
+                  
+                  # 3. Deduplicate and apply filters
+                  echo "=== Applying filters ==="
+                  sort /tmp/all_cluster_images.txt | uniq > /tmp/unique_images.txt
+                  cp /tmp/unique_images.txt /tmp/filtered_images.txt
+                  
+                  # Filter out excluded patterns
+                  {{- range .Values.rhtpa.remoteClusterImageDiscovery.filters.exclude }}
+                  grep -vE {{ . | quote }} /tmp/filtered_images.txt > /tmp/filtered_images.txt.tmp && mv /tmp/filtered_images.txt.tmp /tmp/filtered_images.txt || true
+                  {{- end }}
+                  
+                  # Filter IN included patterns (if defined)
+                  {{- if .Values.rhtpa.remoteClusterImageDiscovery.filters.include }}
+                  echo -n "" > /tmp/included_images.txt
+                  {{- range .Values.rhtpa.remoteClusterImageDiscovery.filters.include }}
+                  grep -E {{ . | quote }} /tmp/filtered_images.txt >> /tmp/included_images.txt || true
+                  {{- end }}
+                  mv /tmp/included_images.txt /tmp/filtered_images.txt
+                  {{- end }}
+                  
+                  # 4. Create/Update ConfigMap
+                  IMAGE_COUNT=$(wc -l < /tmp/filtered_images.txt)
+                  echo "=== Discovery Summary ==="
+                  echo "Total unique images found from remote clusters: $IMAGE_COUNT"
+                  
+                  # Reset KUBECONFIG to local cluster
+                  unset KUBECONFIG
+                  
+                  if [ "$IMAGE_COUNT" -eq 0 ]; then
+                    echo "WARNING: No images found after filtering."
+                    oc create configmap remote-cluster-images \
+                      --from-literal=images.txt="" \
+                      -n {{ .Values.rhtpa.namespace }} \
+                      --dry-run=client -o yaml | oc apply -f -
+                  else
+                    echo "Updating 'remote-cluster-images' ConfigMap..."
+                    oc create configmap remote-cluster-images \
+                      --from-file=images.txt=/tmp/filtered_images.txt \
+                      -n {{ .Values.rhtpa.namespace }} \
+                      --dry-run=client -o yaml | oc apply -f -
+                    
+                    echo "Images discovered (first 20):"
+                    head -20 /tmp/filtered_images.txt
+                  fi
+                  
+                  echo "=== Remote cluster discovery complete ==="
+{{- end }}
+

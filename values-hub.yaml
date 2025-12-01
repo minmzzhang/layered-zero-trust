@@ -299,12 +299,23 @@ clusterGroup:
           value: true
         - name: rhtpa.syft.scanner.suspend
           value: true
-        # Image Discovery - Automatically discover images from production namespaces
-        # When enabled, dynamically discovered images are COMBINED with static images below
-        # Runs a local discovery job to find images running on the hub cluster
+        # Local Image Discovery - Discover images from hub cluster
         - name: rhtpa.localImageDiscovery.enabled
+          value: true  # Enabled - discovers hub cluster images
+        # Remote Cluster Image Discovery - Discover images from production and other remote clusters
+        - name: rhtpa.remoteClusterImageDiscovery.enabled
           value: true
-        # SYFT Images to Scan (Static List)
+        - name: rhtpa.remoteClusterImageDiscovery.schedule
+          value: "0 * * * *"  # Every hour
+        - name: rhtpa.remoteClusterImageDiscovery.suspend
+          value: false  # Run automatically
+        # Configure production cluster for image discovery
+        - name: rhtpa.remoteClusterImageDiscovery.remoteClusters[0].name
+          value: production
+        - name: rhtpa.remoteClusterImageDiscovery.remoteClusters[0].kubeconfigVaultPath
+          value: secret/data/hub/kubeconfig-ztvp-prod
+        # SYFT Images to Scan (Static List - optional additional images)
+        # Multi-cluster discovered images are automatically scanned
         # We use a comma-separated string override to avoid ArgoCD "Fresh Install OutOfSync"
         # issues caused by complex array overrides.
         # Note: registry.redhat.io requires authentication - removed for now

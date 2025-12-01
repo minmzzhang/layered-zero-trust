@@ -209,6 +209,11 @@ spec:
               mountPath: /config/local-images
               readOnly: true
 {{- end }}
+{{- if .Values.rhtpa.remoteClusterImageDiscovery.enabled }}
+            - name: remote-cluster-images
+              mountPath: /config/remote-cluster-images
+              readOnly: true
+{{- end }}
             resources:
               requests:
                 memory: "256Mi"
@@ -262,10 +267,21 @@ spec:
                 path: ca.crt
           
 {{- if .Values.rhtpa.localImageDiscovery.enabled }}
-          # Local cluster images discovered by image-discovery job
+          # Local hub cluster images discovered by local-image-discovery job
           - name: local-images
             configMap:
               name: local-cluster-images
+              optional: true
+              items:
+              - key: images.txt
+                path: images.txt
+{{- end }}
+          
+{{- if .Values.rhtpa.remoteClusterImageDiscovery.enabled }}
+          # Remote cluster images discovered by remote-cluster-image-discovery job
+          - name: remote-cluster-images
+            configMap:
+              name: remote-cluster-images
               optional: true
               items:
               - key: images.txt

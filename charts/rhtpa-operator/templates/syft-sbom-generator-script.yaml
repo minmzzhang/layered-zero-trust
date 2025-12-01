@@ -177,19 +177,32 @@ data:
     IMAGES=()
     
 {{- if .Values.rhtpa.localImageDiscovery.enabled }}
-    # Option 1: Load images from discovery ConfigMap (dynamic)
-    echo "Loading images from discovery ConfigMap..."
+    # Option 1: Load images from local hub cluster discovery ConfigMap
+    echo "Loading images from local hub cluster discovery..."
     if [ -f /config/local-images/images.txt ]; then
-      mapfile -t DISCOVERED_IMAGES < <(cat /config/local-images/images.txt | grep -v "^$")
-      echo "Loaded ${#DISCOVERED_IMAGES[@]} images from ConfigMap"
-      IMAGES+=("${DISCOVERED_IMAGES[@]}")
+      mapfile -t LOCAL_IMAGES < <(cat /config/local-images/images.txt | grep -v "^$")
+      echo "Loaded ${#LOCAL_IMAGES[@]} images from hub cluster"
+      IMAGES+=("${LOCAL_IMAGES[@]}")
     else
       echo "WARNING: Local images file not found at /config/local-images/images.txt"
-      echo "Run the image-discovery job first or configure static images"
+      echo "Run the local-image-discovery job first"
     fi
 {{- end }}
     
-    # Option 2: Add static images from configuration
+{{- if .Values.rhtpa.remoteClusterImageDiscovery.enabled }}
+    # Option 2: Load images from remote cluster discovery ConfigMap
+    echo "Loading images from remote cluster discovery..."
+    if [ -f /config/remote-cluster-images/images.txt ]; then
+      mapfile -t REMOTE_IMAGES < <(cat /config/remote-cluster-images/images.txt | grep -v "^$")
+      echo "Loaded ${#REMOTE_IMAGES[@]} images from remote clusters"
+      IMAGES+=("${REMOTE_IMAGES[@]}")
+    else
+      echo "WARNING: Remote cluster images file not found at /config/remote-cluster-images/images.txt"
+      echo "Run the remote-cluster-image-discovery job first"
+    fi
+{{- end }}
+    
+    # Option 3: Add static images from configuration
     # Supports both YAML list (from values.yaml) and comma-separated string (from overrides)
 {{- if .Values.rhtpa.syft.images }}
     echo "Adding static images from configuration..."

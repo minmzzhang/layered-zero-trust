@@ -314,6 +314,19 @@ clusterGroup:
           value: production
         - name: rhtpa.remoteClusterImageDiscovery.remoteClusters[0].kubeconfigVaultPath
           value: secret/data/hub/kubeconfig-ztvp-prod
+        # Filter out Red Hat registry images (infrastructure images)
+        - name: rhtpa.remoteClusterImageDiscovery.filters.exclude[0]
+          value: "k8s.gcr.io"
+        - name: rhtpa.remoteClusterImageDiscovery.filters.exclude[1]
+          value: "gcr.io/google"
+        - name: rhtpa.remoteClusterImageDiscovery.filters.exclude[2]
+          value: "quay.io/openshift"
+        - name: rhtpa.remoteClusterImageDiscovery.filters.exclude[3]
+          value: "registry.redhat.io"
+        - name: rhtpa.remoteClusterImageDiscovery.filters.exclude[4]
+          value: "registry.connect.redhat.com"
+        - name: rhtpa.remoteClusterImageDiscovery.filters.exclude[5]
+          value: "ghcr.io/external-secrets"
         # SYFT Images to Scan (Static List - optional additional images)
         # Multi-cluster discovered images are automatically scanned
         # We use a comma-separated string override to avoid ArgoCD "Fresh Install OutOfSync"

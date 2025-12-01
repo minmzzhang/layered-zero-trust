@@ -235,8 +235,9 @@ rhtpa:
         - "k8s.gcr.io"
         - "gcr.io/google"
         - "quay.io/openshift"
-        - "registry.redhat.io/openshift"
+        - "registry.redhat.io"  # Exclude all Red Hat registry images (OpenShift, RHACM, MCE, etc.)
         - "registry.connect.redhat.com"
+        - "ghcr.io/external-secrets"  # Exclude external-secrets operator
       include: []
 
 # Global Configuration

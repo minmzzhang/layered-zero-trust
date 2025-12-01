@@ -11,6 +11,7 @@ clusterGroup:
     - golang-external-secrets
     - policies
     - openshift-pipelines
+    - qtodo
   subscriptions:
     openshift-pipelines:
       name: openshift-pipelines-operator-rh
@@ -25,6 +26,20 @@ clusterGroup:
       project: eso
       chart: golang-external-secrets
       chartVersion: 0.1.*
+    qtodo:
+      name: qtodo
+      namespace: qtodo
+      project: prod
+      path: charts/qtodo
+      annotations:
+        argocd.argoproj.io/sync-wave: "10"
+      overrides:
+        - name: app.oidc.enabled
+          value: false  # Disable OIDC on spoke cluster
+        - name: app.spire.enabled
+          value: false  # Disable SPIRE on spoke cluster (no ZTWIM on spoke)
+        - name: app.vault.url
+          value: ""  # No Vault on spoke cluster
   sharedValueFiles:
     - '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml'
 

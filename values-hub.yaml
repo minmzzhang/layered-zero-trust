@@ -170,6 +170,12 @@ clusterGroup:
       name: acm-managed-clusters
       project: hub
       path: charts/acm-managed-clusters
+      ignoreDifferences:
+        - group: cluster.open-cluster-management.io
+          kind: ManagedCluster
+          jsonPointers:
+            - /metadata/labels/cloud
+            - /metadata/labels/vendor
     compliance-scanning:
       name: compliance-scanning
       namespace: openshift-compliance
@@ -350,6 +356,14 @@ clusterGroup:
           value: qtodo
         - name: app.vault.secretPath
           value: secret/data/global/qtodo
+  argoCD:
+    resourceExclusions: |
+      - apiGroups:
+        - internal.open-cluster-management.io
+        kinds:
+        - ManagedClusterInfo
+        clusters:
+        - "*"
 
   imperative:
     # NOTE: We *must* use lists and not hashes. As hashes lose ordering once parsed by helm

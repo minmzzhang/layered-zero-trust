@@ -427,6 +427,14 @@ clusterGroup:
             operator: In
             values:
               - OpenShift
+      # Fix app-of-apps sync issue: Don't wait for child Application health during parent sync
+      # This prevents the chicken-and-egg problem where parent waits for child Apps to be healthy
+      # but child Apps can't be created until parent sync completes
+      ignoreDifferences:
+        - group: argoproj.io
+          kind: Application
+          jsonPointers:
+            - /status
 
     # exampleRegion:
     #   name: group-one

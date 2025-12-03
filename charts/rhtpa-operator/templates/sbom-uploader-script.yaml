@@ -1,0 +1,160 @@
+{{- if .Values.rhtpa.syft.enabled }}
+---
+# SBOM Uploader Script (Multi-container: Part 2)
+# Uploads SBOMs to RHTPA API using Python and OIDC authentication
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sbom-uploader-script
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+data:
+  upload-sboms.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "SBOM Uploader (Multi-Container Architecture)"
+    echo "============================================="
+    echo "Container: sbom-uploader"
+    echo "Image: Red Hat Python 3.11 UBI"
+    echo "Python Packages: Pre-installed by init container"
+    echo ""
+    
+    # Configuration
+    SBOM_DIR="/sboms"
+    VAULT_ADDR="{{ .Values.rhtpa.zeroTrust.vault.url }}"
+    VAULT_ROLE="{{ .Values.rhtpa.syft.vault.role }}"
+    JWT_PATH="/run/secrets/spiffe/jwt.token"
+    
+    # Setup CA bundle for SSL verification
+    setup_ca_bundle() {
+      echo "Setting up CA bundle..."
+      # Create a writable copy of the system CA bundle
+      if [ -f /etc/pki/tls/certs/ca-bundle.crt ]; then
+        cp /etc/pki/tls/certs/ca-bundle.crt /tmp/ca-bundle.crt
+        chmod 644 /tmp/ca-bundle.crt
+      else
+        touch /tmp/ca-bundle.crt
+      fi
+      
+      # Append additional CAs
+      [ -f /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt ] && \
+        cat /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt >> /tmp/ca-bundle.crt
+      
+      [ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ] && \
+        cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt >> /tmp/ca-bundle.crt
+      
+      [ -f /var/run/secrets/kubernetes.io/serviceaccount/ingress-ca/ca.crt ] && \
+        cat /var/run/secrets/kubernetes.io/serviceaccount/ingress-ca/ca.crt >> /tmp/ca-bundle.crt
+      
+      export REQUESTS_CA_BUNDLE="/tmp/ca-bundle.crt"
+      export SSL_CERT_FILE="/tmp/ca-bundle.crt"
+      echo "CA bundle configured"
+    }
+    
+    # Verify Python environment (using standard library only)
+    echo "Verifying Python environment..."
+    echo "  Python version: $(python3 --version)"
+    echo "  Using Python standard library (no third-party packages required)"
+    echo ""
+    
+    # Setup CA bundle
+    setup_ca_bundle
+    echo ""
+    
+    # Wait for SPIFFE helper to generate JWT
+    echo "Waiting for JWT token..."
+    for i in {1..30}; do
+      if [ -f "$JWT_PATH" ] && [ -s "$JWT_PATH" ]; then
+        echo "JWT token found"
+        break
+      fi
+      echo "Waiting... ($i/30)"
+      sleep 2
+    done
+    
+    if [ ! -f "$JWT_PATH" ] || [ ! -s "$JWT_PATH" ]; then
+      echo "ERROR: JWT token not found or empty at $JWT_PATH"
+      exit 1
+    fi
+    echo ""
+    
+    # Setup environment for Python upload script
+    export VAULT_URL="$VAULT_ADDR"
+    export VAULT_ROLE="$VAULT_ROLE"
+    export VAULT_SECRET_PATH="{{ .Values.rhtpa.syft.vault.secretPath }}"
+    export JWT_TOKEN_FILE="$JWT_PATH"
+    
+    # Wait for SBOM generation to complete
+    echo "Waiting for SBOM generation to complete..."
+    for i in {1..60}; do
+      if [ -f "$SBOM_DIR/.generation-complete" ]; then
+        echo "SBOM generation complete!"
+        break
+      fi
+      echo "Waiting... ($i/60)"
+      sleep 2
+    done
+    
+    if [ ! -f "$SBOM_DIR/.generation-complete" ]; then
+      echo "ERROR: SBOM generation did not complete in time"
+      exit 1
+    fi
+    echo ""
+    
+    # Find all SBOM files
+    SBOM_FILES=$(find "$SBOM_DIR" -name "*.json" -type f)
+    SBOM_COUNT=$(echo "$SBOM_FILES" | grep -c "\.json$" || echo "0")
+    
+    echo "Found $SBOM_COUNT SBOMs to upload"
+    echo ""
+    
+    if [ "$SBOM_COUNT" -eq 0 ]; then
+      echo "No SBOMs to upload"
+      exit 0
+    fi
+    
+    # Upload each SBOM
+    SUCCESS_COUNT=0
+    FAIL_COUNT=0
+    
+    for sbom_file in $SBOM_FILES; do
+      echo "Uploading: $(basename $sbom_file)"
+      export SBOM_FILE="$sbom_file"
+      
+      if python3 /scripts/rhtpa-api-upload.py; then
+        echo "  SUCCESS: Uploaded to RHTPA API"
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+      else
+        echo "  ERROR: Failed to upload to RHTPA API"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+      fi
+      echo ""
+    done
+    
+    # Summary
+    echo "=========================================="
+    echo "Upload Summary"
+    echo "=========================================="
+    echo "Total SBOMs: $SBOM_COUNT"
+    echo "Successful: $SUCCESS_COUNT"
+    echo "Failed: $FAIL_COUNT"
+    echo ""
+    
+    # Signal completion and terminate sidecar
+    touch /tmp/upload-complete
+    
+    # Kill the spiffe-helper sidecar to allow the pod to terminate
+    echo "Stopping spiffe-helper sidecar..."
+    killall spiffe-helper 2>/dev/null || true
+    echo "Upload complete!"
+    
+    if [ $FAIL_COUNT -gt 0 ]; then
+      echo "WARNING: Some uploads failed"
+      exit 0  # Don't fail the job for partial success
+    fi
+    
+    exit 0
+{{- end }}
+

@@ -161,11 +161,51 @@ spec:
           fi
           
           if [ "$INGRESS_CA_FOUND" = "false" ]; then
-            echo "ERROR: Could not find ingress CA certificate."
-            echo "Please provide a custom CA certificate using one of these methods:"
-            echo "  1. Set rhtpa.tls.ingressCA.certificate with PEM-encoded CA"
-            echo "  2. Enable rhtpa.tls.ingressCA.customSource and specify secret details"
-            echo "  3. Ensure OpenShift ingress has a valid certificate configuration"
+            echo "======================================================================"
+            echo "ERROR: Could not find ingress CA certificate"
+            echo "======================================================================"
+            echo ""
+            echo "The job attempted to find certificates in the following locations:"
+            echo "  1. Secret 'router-certs-default' in openshift-ingress namespace"
+            echo "  2. IngressController custom certificate reference"
+            echo "  3. Common secret names: custom-certs-default, ingress-certs-default, router-certs"
+            echo ""
+            echo "If you are using custom certificates, please configure one of these options:"
+            echo ""
+            echo "----------------------------------------------------------------------"
+            echo "Option 1: Provide certificate directly in Helm values"
+            echo "----------------------------------------------------------------------"
+            echo "rhtpa:"
+            echo "  tls:"
+            echo "    ingressCA:"
+            echo "      enabled: true"
+            echo "      certificate: |"
+            echo "        -----BEGIN CERTIFICATE-----"
+            echo "        <your PEM-encoded CA certificate>"
+            echo "        -----END CERTIFICATE-----"
+            echo ""
+            echo "----------------------------------------------------------------------"
+            echo "Option 2: Reference an existing Kubernetes secret"
+            echo "----------------------------------------------------------------------"
+            echo "rhtpa:"
+            echo "  tls:"
+            echo "    ingressCA:"
+            echo "      enabled: true"
+            echo "      customSource:"
+            echo "        enabled: true"
+            echo "        secretName: \"your-custom-cert-secret\""
+            echo "        secretNamespace: \"openshift-ingress\""
+            echo "        secretKey: \"tls.crt\""
+            echo ""
+            echo "----------------------------------------------------------------------"
+            echo "Option 3: Configure your custom cert in OpenShift IngressController"
+            echo "----------------------------------------------------------------------"
+            echo "oc patch ingresscontroller default -n openshift-ingress-operator \\"
+            echo "  --type merge -p '{\"spec\":{\"defaultCertificate\":{\"name\":\"your-cert-secret\"}}}'"
+            echo ""
+            echo "For more information, see:"
+            echo "https://docs.openshift.com/container-platform/latest/security/certificates/"
+            echo "======================================================================"
             exit 1
           fi
           {{- end }}
@@ -181,12 +221,44 @@ spec:
             echo "WARNING: openssl not available, skipping certificate validation"
           fi
           
-          # Create or update the ingress CA ConfigMap (for backward compatibility)
-          oc create configmap rhtpa-ingress-ca -n {{ .Values.rhtpa.namespace }} \
-            --from-file=ca.crt=/tmp/ingress-ca.crt \
-            --dry-run=client -o yaml | oc apply -f -
+          # Create or update the ingress CA ConfigMap with ArgoCD pruning protection
+          echo "Creating ingress CA ConfigMap..."
+          cat <<EOF | oc apply -f -
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: rhtpa-ingress-ca
+            namespace: {{ .Values.rhtpa.namespace }}
+            annotations:
+              argocd.argoproj.io/sync-options: Prune=false
+            labels:
+              app.kubernetes.io/name: rhtpa
+              app.kubernetes.io/component: tls-certificates
+              app.kubernetes.io/managed-by: rhtpa-ingress-ca-extractor
+          data:
+            ca.crt: |
+          $(cat /tmp/ingress-ca.crt | sed 's/^/      /')
+          EOF
           
-          echo "Ingress CA certificate extracted and stored in ConfigMap"
+          # Verify ConfigMap was created with valid certificate data
+          echo "Validating ConfigMap contents..."
+          CERT_SIZE=$(oc get configmap rhtpa-ingress-ca -n {{ .Values.rhtpa.namespace }} \
+            -o jsonpath='{.data.ca\.crt}' 2>/dev/null | wc -c)
+          
+          if [ -z "$CERT_SIZE" ] || [ "$CERT_SIZE" -lt 100 ]; then
+            echo "ERROR: ConfigMap created but certificate data is missing or too small ($CERT_SIZE bytes)"
+            echo "This usually indicates a problem with certificate extraction or ConfigMap creation"
+            exit 1
+          fi
+          
+          # Verify it's valid PEM format
+          if ! oc get configmap rhtpa-ingress-ca -n {{ .Values.rhtpa.namespace }} \
+            -o jsonpath='{.data.ca\.crt}' | grep -q "^-----BEGIN CERTIFICATE-----"; then
+            echo "ERROR: ConfigMap data does not contain valid PEM certificate"
+            exit 1
+          fi
+          
+          echo "ConfigMap validation passed (certificate size: $CERT_SIZE bytes)"
           
           # Extract the OpenShift service CA (for NooBaa S3 and other internal services)
           echo "Extracting OpenShift service CA certificate..."
@@ -199,11 +271,45 @@ spec:
           echo "Creating combined CA bundle..."
           cat /tmp/ingress-ca.crt /tmp/service-ca.crt > /tmp/combined-ca.crt
           
-          # Create the combined CA ConfigMap
-          oc create configmap rhtpa-combined-ca -n {{ .Values.rhtpa.namespace }} \
-            --from-file=combined-ca.crt=/tmp/combined-ca.crt \
-            --dry-run=client -o yaml | oc apply -f -
+          # Create the combined CA ConfigMap with ArgoCD pruning protection
+          echo "Creating combined CA ConfigMap..."
+          cat <<EOF | oc apply -f -
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: rhtpa-combined-ca
+            namespace: {{ .Values.rhtpa.namespace }}
+            annotations:
+              argocd.argoproj.io/sync-options: Prune=false
+            labels:
+              app.kubernetes.io/name: rhtpa
+              app.kubernetes.io/component: tls-certificates
+              app.kubernetes.io/managed-by: rhtpa-ingress-ca-extractor
+          data:
+            combined-ca.crt: |
+          $(cat /tmp/combined-ca.crt | sed 's/^/      /')
+          EOF
           
-          echo "Combined CA bundle created (ingress CA + service CA)"
+          # Verify combined CA ConfigMap was created with valid certificate data
+          echo "Validating combined CA ConfigMap contents..."
+          COMBINED_CERT_SIZE=$(oc get configmap rhtpa-combined-ca -n {{ .Values.rhtpa.namespace }} \
+            -o jsonpath='{.data.combined-ca\.crt}' 2>/dev/null | wc -c)
+          
+          if [ -z "$COMBINED_CERT_SIZE" ] || [ "$COMBINED_CERT_SIZE" -lt 200 ]; then
+            echo "ERROR: Combined CA ConfigMap created but certificate data is missing or too small ($COMBINED_CERT_SIZE bytes)"
+            echo "This usually indicates a problem with certificate extraction or ConfigMap creation"
+            exit 1
+          fi
+          
+          # Verify combined CA contains at least 2 certificates
+          CERT_COUNT=$(oc get configmap rhtpa-combined-ca -n {{ .Values.rhtpa.namespace }} \
+            -o jsonpath='{.data.combined-ca\.crt}' | grep -c "BEGIN CERTIFICATE" || echo "0")
+          
+          if [ "$CERT_COUNT" -lt 2 ]; then
+            echo "ERROR: Combined CA should contain at least 2 certificates (ingress + service), found $CERT_COUNT"
+            exit 1
+          fi
+          
+          echo "Combined CA validation passed (size: $COMBINED_CERT_SIZE bytes, certificates: $CERT_COUNT)"
 {{- end }}
 

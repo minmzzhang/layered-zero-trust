@@ -160,9 +160,13 @@ rhtpa:
   #    - CronJob for scanning existing/third-party images
   syft:
     enabled: false  # Set to true to enable standalone SBOM generation
-    # Use UBI-based image with syft, bash, curl, and jq for full script support
-    # Same image used for main container and init containers (includes curl for health checks)
-    image: "registry.redhat.io/ubi9/ubi:latest"
+    # Multi-container approach: syft for generation, Python for API upload
+    # Syft image: Red Hat Tech Preview image with syft binary
+    # https://catalog.redhat.com/software/containers/rh-syft-tech-preview/syft-rhel9/65b2745c19638ad4ad858412
+    syftImage: "registry.redhat.io/rh-syft-tech-preview/syft-rhel9:1.29.0"
+    # Uploader image: Red Hat Python UBI with Python, pip, curl pre-installed
+    # https://catalog.redhat.com/software/containers/ubi9/python-311
+    uploaderImage: "registry.redhat.io/ubi9/python-311:latest"
     format: "spdx-json"  # Options: spdx-json, cyclonedx-json, syft-json
     
     # RHTPA API URL for SBOM upload
@@ -199,26 +203,6 @@ rhtpa:
       # and proceed as soon as it's ready 
       # Set to 0 to disable the health check
       healthCheckTimeout: 60  # Maximum wait time: 60 seconds
-  
-  # Local Image Discovery
-  # Discovers images running on the current cluster to feed into the scanner
-  localImageDiscovery:
-    enabled: true  # Set to true to enable local image discovery cronjob
-    image: "registry.redhat.io/openshift4/ose-cli:latest"
-    
-    # Image filters
-    filters:
-      # Exclude patterns (regex)
-      exclude:
-        - "k8s.gcr.io"
-        - "gcr.io/google"
-        - "quay.io/openshift"
-        - "registry.redhat.io"
-        - "registry.connect.redhat.com"
-      # Include patterns (optional - if set, only matching images are included)
-      include: []
-      #  - "quay.io/myorg"
-      #  - "registry.mycompany.com"
 
 # Global Configuration
 global:

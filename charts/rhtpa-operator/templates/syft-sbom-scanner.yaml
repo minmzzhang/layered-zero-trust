@@ -31,10 +31,30 @@ spec:
           shareProcessNamespace: true  # Allow containers to signal each other
           
           initContainers:
+          # Copy system CA bundle for syft (minimal syft image lacks public root CAs)
+          - name: setup-ca-bundle
+            image: registry.redhat.io/ubi9/ubi:latest
+            command:
+            - sh
+            - -c
+            - |
+              echo "Copying system CA bundle for syft container..."
+              # UBI has public root CAs, syft image doesn't
+              if [ -f /etc/pki/tls/certs/ca-bundle.crt ]; then
+                cp /etc/pki/tls/certs/ca-bundle.crt /ca-copy/system-ca-bundle.crt
+                echo "System CA bundle copied ($(wc -l < /ca-copy/system-ca-bundle.crt) lines)"
+              else
+                echo "ERROR: System CA bundle not found in UBI image!"
+                exit 1
+              fi
+            volumeMounts:
+            - name: ca-copy
+              mountPath: /ca-copy
+          
           {{- if gt (int .Values.rhtpa.syft.scanner.healthCheckTimeout) 0 }}
           # Wait for RHTPA server to be ready with health check
           - name: wait-for-rhtpa
-            image: {{ .Values.rhtpa.syft.image }}
+            image: registry.redhat.io/ubi9/ubi:latest
             command:
             - sh
             - -c
@@ -60,7 +80,7 @@ spec:
           
           # Wait for SPIFFE workload API socket
           - name: wait-for-spiffe
-            image: {{ .Values.rhtpa.syft.image }}
+            image: registry.redhat.io/ubi9/ubi:latest
             command:
             - sh
             - -c
@@ -84,7 +104,7 @@ spec:
               readOnly: true
           
           containers:
-          # SPIFFE Helper - Generates JWT tokens
+          # SPIFFE Helper - Generates JWT tokens (Sidecar)
           - name: spiffe-helper
             image: ghcr.io/spiffe/spiffe-helper:0.10.1
             imagePullPolicy: IfNotPresent
@@ -111,68 +131,50 @@ spec:
                 memory: "128Mi"
                 cpu: "100m"
           
-          # SYFT - Generates SBOMs and submits to RHTPA
-          - name: syft
-            image: {{ .Values.rhtpa.syft.image }}
+          # SYFT Generator - Generates SBOMs using Red Hat syft image
+          - name: syft-generator
+            image: {{ .Values.rhtpa.syft.syftImage }}
             imagePullPolicy: IfNotPresent
-            command: ["/bin/bash", "-c"]
-            args:
-            - |
-              set -ex
-              echo "Initializing scanner..."
-              
-              # Install to /tmp (world writable)
-              mkdir -p /tmp/bin
-              export PATH="/tmp/bin:$HOME/.local/bin:$PATH"
-              
-              # Install Python packages for API upload script
-              echo "Installing Python packages (requests)..."
-              # Install pip if not available
-              if ! command -v pip &> /dev/null; then
-                curl -sSfL https://bootstrap.pypa.io/get-pip.py | python3 - --user
-              fi
-              # Install requests
-              python3 -m pip install --user --no-warn-script-location requests urllib3
-              
-              # Install syft
-              # Note: syft installation is handled inside generate-sboms.sh too,
-              # but ensuring dependencies here makes debugging easier.
-              
-              # Install jq (static binary, no root needed)
-              if ! command -v jq &> /dev/null; then
-                echo "Installing jq..."
-                curl -sSfL -o /tmp/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
-                chmod +x /tmp/bin/jq
-              fi
-              
-              echo "Dependencies installed successfully"
-              echo "Python version: $(python3 --version)"
-              echo "Requests version: $(python3 -c 'import requests; print(requests.__version__)')"
-              
-              echo "Starting scheduled SBOM scan at $(date)"
-              echo ""
-              
-              # Wait for SPIFFE helper to generate JWT
-              sleep 10
-              
-              # Execute SBOM generation script
-              /scripts/generate-sboms.sh
-              
-              echo ""
-              echo "Scheduled scan completed at $(date)"
+            command: ["/bin/sh", "/scripts/generate-sboms.sh"]
             env:
             - name: HOME
               value: "/tmp"
             - name: SYFT_CACHE_DIR
               value: /tmp/.cache/syft
-            - name: VAULT_ADDR
-              value: {{ .Values.rhtpa.zeroTrust.vault.url | quote }}
-            - name: VAULT_SECRET_PATH
-              value: {{ .Values.rhtpa.syft.vault.secretPath | quote }}
-            - name: VAULT_SKIP_VERIFY
-              value: "true"
-            - name: SBOM_FORMAT
-              value: {{ .Values.rhtpa.syft.format | quote }}
+            volumeMounts:
+            - name: generator-script
+              mountPath: /scripts
+              readOnly: true
+            - name: images-config
+              mountPath: /config
+              readOnly: true
+            - name: sboms
+              mountPath: /sboms
+            - name: ca-copy
+              mountPath: /ca-bundle
+              readOnly: true
+            - name: service-ca
+              mountPath: /etc/pki/ca-trust/extracted/pem
+              readOnly: true
+            - name: ingress-ca
+              mountPath: /etc/pki/ca-trust/source/anchors
+              readOnly: true
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "1Gi"
+                cpu: "1000m"
+          
+          # SBOM Uploader - Uploads SBOMs using Python UBI image
+          - name: sbom-uploader
+            image: {{ .Values.rhtpa.syft.uploaderImage }}
+            imagePullPolicy: IfNotPresent
+            command: ["/bin/bash", "/scripts/upload-sboms.sh"]
+            env:
+            - name: HOME
+              value: "/tmp"
             # RHTPA API Upload Configuration
             - name: RHTPA_API_URL
               {{- if .Values.rhtpa.syft.apiUrl }}
@@ -190,32 +192,28 @@ spec:
                   name: {{ .Values.rhtpa.zeroTrust.keycloak.clients.cli.secretName | default "rhtpa-oidc-cli-secret" }}
                   key: client-secret
             volumeMounts:
-            - name: script
+            - name: uploader-scripts
               mountPath: /scripts
+              readOnly: true
+            - name: sboms
+              mountPath: /sboms
               readOnly: true
             - name: spiffe-jwt
               mountPath: /run/secrets/spiffe
               readOnly: true
-            - name: output
-              mountPath: /tmp/sboms
             - name: service-ca
               mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
             - name: ingress-ca
               mountPath: /var/run/secrets/kubernetes.io/serviceaccount/ingress-ca
               readOnly: true
-{{- if .Values.rhtpa.localImageDiscovery.enabled }}
-            - name: local-images
-              mountPath: /config/local-images
-              readOnly: true
-{{- end }}
             resources:
               requests:
-                memory: "256Mi"
-                cpu: "200m"
+                memory: "128Mi"
+                cpu: "100m"
               limits:
-                memory: "1Gi"
-                cpu: "1000m"
+                memory: "512Mi"
+                cpu: "500m"
           
           volumes:
           # SPIFFE CSI driver volume
@@ -235,15 +233,34 @@ spec:
             emptyDir:
               medium: Memory
           
-          # SBOM generation scripts (bash and Python)
-          - name: script
+          # Shared volume for SBOMs (between generator and uploader)
+          - name: sboms
+            emptyDir: {}
+          
+          # Shared volume for system CA bundle (from init container to syft-generator)
+          - name: ca-copy
+            emptyDir: {}
+          
+          # SYFT generator script
+          - name: generator-script
+            configMap:
+              name: syft-generator-script
+              defaultMode: 0755
+          
+          # SBOM uploader scripts (bash + Python combined)
+          - name: uploader-scripts
             projected:
               defaultMode: 0755
               sources:
               - configMap:
-                  name: syft-sbom-generator-script
+                  name: sbom-uploader-script
               - configMap:
                   name: syft-python-scripts
+          
+          # Images configuration (list of images to scan)
+          - name: images-config
+            configMap:
+              name: syft-images-config
           
           # OpenShift service CA bundle for SSL verification
           - name: service-ca
@@ -260,20 +277,5 @@ spec:
               items:
               - key: ca.crt
                 path: ca.crt
-          
-{{- if .Values.rhtpa.localImageDiscovery.enabled }}
-          # Local cluster images discovered by image-discovery job
-          - name: local-images
-            configMap:
-              name: local-cluster-images
-              optional: true
-              items:
-              - key: images.txt
-                path: images.txt
-{{- end }}
-          
-          # Output directory for SBOMs
-          - name: output
-            emptyDir: {}
 {{- end }}
 {{- end }}

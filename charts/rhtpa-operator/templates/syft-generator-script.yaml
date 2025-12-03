@@ -1,0 +1,166 @@
+{{- if .Values.rhtpa.syft.enabled }}
+---
+# SYFT SBOM Generator Script (Multi-container: Part 1)
+# Generates SBOMs using SYFT and saves to shared volume
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-generator-script
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+data:
+  generate-sboms.sh: |
+    #!/bin/sh
+    set -e
+    
+    echo "SYFT SBOM Generator (Multi-Container Architecture)"
+    echo "==================================================="
+    echo "Container: syft-generator"
+    echo "Image: Red Hat syft Tech Preview"
+    echo ""
+    
+    # Setup CA bundle for TLS verification (accessing remote registries)
+    echo "Setting up CA bundle..."
+    
+    # Build combined CA bundle
+    CA_BUNDLE="/tmp/ca-bundle.crt"
+    
+    # Start with system CAs copied from init container (for public registries)
+    SYSTEM_CA="/ca-bundle/system-ca-bundle.crt"
+    if [ -f "$SYSTEM_CA" ]; then
+      echo "Using system CA bundle copied from init container..."
+      cat "$SYSTEM_CA" > "$CA_BUNDLE"
+      SYSTEM_CA_LINES=$(wc -l < "$SYSTEM_CA")
+      echo "System CAs loaded: ${SYSTEM_CA_LINES} lines"
+    else
+      echo "ERROR: System CA bundle not found at $SYSTEM_CA"
+      echo "Init container may have failed to copy CAs"
+      exit 1
+    fi
+    
+    # Append OpenShift Service CA if mounted
+    if [ -f /etc/pki/ca-trust/extracted/pem/service-ca.crt ]; then
+      echo "Adding OpenShift Service CA..."
+      cat /etc/pki/ca-trust/extracted/pem/service-ca.crt >> "$CA_BUNDLE"
+    fi
+    
+    # Append OpenShift Ingress CA if mounted
+    if [ -f /etc/pki/ca-trust/source/anchors/ca.crt ]; then
+      echo "Adding OpenShift Ingress CA..."
+      cat /etc/pki/ca-trust/source/anchors/ca.crt >> "$CA_BUNDLE"
+    fi
+    
+    # Configure syft to use our CA bundle
+    export SSL_CERT_FILE="$CA_BUNDLE"
+    export REQUESTS_CA_BUNDLE="$CA_BUNDLE"
+    
+    # Debug: check CA bundle size
+    CA_SIZE=$(wc -l < "$CA_BUNDLE")
+    echo "CA bundle configured at: $CA_BUNDLE (${CA_SIZE} lines)"
+    echo ""
+    
+    # Configuration
+    OUTPUT_DIR="/sboms"
+    SBOM_FORMAT="{{ .Values.rhtpa.syft.format }}"
+    IMAGES_FILE="/config/images.txt"
+    
+    mkdir -p "$OUTPUT_DIR"
+    
+    # Verify syft is available (pre-installed in Red Hat syft image)
+    if ! command -v syft > /dev/null 2>&1; then
+      echo "ERROR: syft command not found"
+      exit 1
+    fi
+    
+    echo "Syft version: $(syft version 2>&1 | head -1)"
+    echo ""
+    
+    # Read images list from config file
+    if [ ! -f "$IMAGES_FILE" ]; then
+      echo "ERROR: Images list not found at $IMAGES_FILE"
+      exit 1
+    fi
+    
+    # Count images (avoid grep - not in syft image)
+    IMAGE_COUNT=0
+    while IFS= read -r line; do
+      [ -n "$line" ] && IMAGE_COUNT=$((IMAGE_COUNT + 1))
+    done < "$IMAGES_FILE"
+    
+    echo "Images to scan: $IMAGE_COUNT"
+    echo ""
+    
+    if [ "$IMAGE_COUNT" -eq 0 ]; then
+      echo "No images configured for scanning"
+      exit 0
+    fi
+    
+    # Process all images
+    SUCCESS_COUNT=0
+    FAIL_COUNT=0
+    
+    while IFS= read -r image; do
+      # Skip empty lines
+      [ -z "$image" ] && continue
+      
+      # Sanitize image name for filename (no sed/grep needed)
+      # Remove registry path (keep only image name after last /)
+      image_name="${image##*/}"
+      # Replace : with -
+      image_name="${image_name//:/-}"
+      # Replace @ with -
+      image_name="${image_name//@/-}"
+      # Replace / with - (for multi-part names)
+      image_name="${image_name//\//-}"
+      # Replace . with - (for domains)
+      image_name="${image_name//./-}"
+      
+      sbom_file="$OUTPUT_DIR/${image_name}-sbom.${SBOM_FORMAT}.json"
+      
+      echo ""
+      echo "Processing: $image"
+      echo "----------------------------------------"
+      echo "  Generating SBOM..."
+      
+      if syft registry:${image} -o ${SBOM_FORMAT} > "$sbom_file" 2>/tmp/syft-error.log; then
+        echo "  SUCCESS: SBOM generated: $sbom_file"
+        
+        # Get file size (no awk needed - use wc for byte count)
+        SBOM_SIZE=$(wc -c < "$sbom_file")
+        echo "  SBOM size: ${SBOM_SIZE} bytes"
+        
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+      else
+        echo "  ERROR: Failed to generate SBOM for $image"
+        cat /tmp/syft-error.log
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+      fi
+    done < "$IMAGES_FILE"
+    
+    # Summary
+    echo ""
+    echo "=========================================="
+    echo "SBOM Generation Summary"
+    echo "=========================================="
+    echo "Total images: $IMAGE_COUNT"
+    echo "Successful: $SUCCESS_COUNT"
+    echo "Failed: $FAIL_COUNT"
+    echo ""
+    echo "SBOMs stored in: $OUTPUT_DIR"
+    ls -lh "$OUTPUT_DIR" 2>/dev/null || echo "No SBOMs generated"
+    echo ""
+    
+    # Create completion marker for uploader container
+    touch "$OUTPUT_DIR/.generation-complete"
+    
+    if [ $FAIL_COUNT -gt 0 ]; then
+      echo "WARNING: Some SBOMs failed to generate ($FAIL_COUNT failed, $SUCCESS_COUNT succeeded)"
+      echo "Continuing anyway - partial success is acceptable"
+    else
+      echo "SUCCESS: All SBOMs generated successfully!"
+    fi
+    
+    exit 0
+{{- end }}
+

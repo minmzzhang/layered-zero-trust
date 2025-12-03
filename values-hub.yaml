@@ -294,11 +294,6 @@ clusterGroup:
           value: true
         - name: rhtpa.syft.scanner.suspend
           value: true
-        # Image Discovery - Automatically discover images from production namespaces
-        # When enabled, dynamically discovered images are COMBINED with static images below
-        # Runs a local discovery job to find images running on the hub cluster
-        - name: rhtpa.localImageDiscovery.enabled
-          value: true
         # SYFT Images to Scan (Static List)
         # We use a comma-separated string override to avoid ArgoCD "Fresh Install OutOfSync"
         # issues caused by complex array overrides.

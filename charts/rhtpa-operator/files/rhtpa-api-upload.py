@@ -2,16 +2,16 @@
 """
 RHTPA API Upload Script
 Uploads SBOMs to RHTPA (Trustify) API using OIDC authentication
+
+Uses Python standard library (urllib) instead of third-party packages.
 """
+import json
 import os
+import ssl
 import sys
-from urllib.parse import urljoin
-
-import requests  # type: ignore[import-untyped]
-import urllib3
-
-# Disable warnings for self-signed certs
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urljoin
+from urllib.request import Request, urlopen
 
 
 def get_env_var(name: str) -> str:
@@ -26,7 +26,19 @@ def get_env_var(name: str) -> str:
     return value
 
 
-def get_oidc_token(issuer_url: str, client_id: str, client_secret: str) -> str:
+def get_ssl_context() -> ssl.SSLContext:
+    """Create SSL context for certificate verification."""
+    ssl_context = ssl.create_default_context()
+    
+    # Load CA bundle if specified
+    ca_bundle = os.environ.get("REQUESTS_CA_BUNDLE")
+    if ca_bundle and os.path.exists(ca_bundle):
+        ssl_context.load_verify_locations(ca_bundle)
+    
+    return ssl_context
+
+
+def get_oidc_token(issuer_url: str, client_id: str, client_secret: str, ssl_context: ssl.SSLContext) -> str:
     """Get OIDC token using client credentials grant."""
     token_url = f"{issuer_url}/protocol/openid-connect/token"
     data = {
@@ -37,22 +49,30 @@ def get_oidc_token(issuer_url: str, client_id: str, client_secret: str) -> str:
 
     print(f"Requesting OIDC token from {token_url}...")
     try:
-        # Verify SSL using environment variables (REQUESTS_CA_BUNDLE) or default
-        verify_ssl = os.environ.get("REQUESTS_CA_BUNDLE", True)
-        if verify_ssl == "False" or verify_ssl == "false":
-            verify_ssl = False
-
-        response = requests.post(token_url, data=data, verify=verify_ssl, timeout=30)
-        response.raise_for_status()
-        return response.json()["access_token"]
-    except Exception as e:
+        # Encode data as application/x-www-form-urlencoded
+        encoded_data = urlencode(data).encode('utf-8')
+        
+        request = Request(
+            token_url,
+            data=encoded_data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            method='POST'
+        )
+        
+        response = urlopen(request, context=ssl_context, timeout=30)
+        response_data = json.loads(response.read().decode('utf-8'))
+        return response_data["access_token"]
+    except HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else "No response body"
+        print(f"ERROR: Failed to get OIDC token: HTTP {e.code} {e.reason}", file=sys.stderr)
+        print(f"Response: {error_body}", file=sys.stderr)
+        sys.exit(1)
+    except (URLError, Exception) as e:
         print(f"ERROR: Failed to get OIDC token: {e}", file=sys.stderr)
-        if "response" in locals():
-            print(f"Response: {response.text}", file=sys.stderr)
         sys.exit(1)
 
 
-def upload_sbom(api_url: str, token: str, file_path: str) -> bool:
+def upload_sbom(api_url: str, token: str, file_path: str, ssl_context: ssl.SSLContext) -> bool:
     """Upload SBOM to RHTPA API.
 
     Uses v2 API endpoint which automatically stores SBOM in S3
@@ -60,37 +80,35 @@ def upload_sbom(api_url: str, token: str, file_path: str) -> bool:
     Reference: https://github.com/guacsec/trustify-ui
     """
     upload_url = urljoin(api_url, "/api/v2/sbom")
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-
+    
     print(f"Uploading {file_path} to {upload_url}...")
 
     try:
         with open(file_path, "rb") as f:
             sbom_data = f.read()
 
-        # Verify SSL
-        verify_ssl = os.environ.get("REQUESTS_CA_BUNDLE", True)
-        if verify_ssl == "False" or verify_ssl == "false":
-            verify_ssl = False
-
-        response = requests.post(
+        request = Request(
             upload_url,
-            headers=headers,
             data=sbom_data,
-            verify=verify_ssl,
-            timeout=60,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method='POST'
         )
-        response.raise_for_status()
+        
+        response = urlopen(request, context=ssl_context, timeout=60)
+        response_body = response.read().decode('utf-8')
         print(f"SUCCESS: Uploaded {file_path}")
-        print(f"Response: {response.text}")
+        print(f"Response: {response_body}")
         return True
-    except Exception as e:
+    except HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else "No response body"
+        print(f"ERROR: Failed to upload SBOM: HTTP {e.code} {e.reason}", file=sys.stderr)
+        print(f"Response: {error_body}", file=sys.stderr)
+        return False
+    except (URLError, IOError, Exception) as e:
         print(f"ERROR: Failed to upload SBOM: {e}", file=sys.stderr)
-        if "response" in locals():
-            print(f"Response: {response.text}", file=sys.stderr)
         return False
 
 
@@ -102,9 +120,10 @@ def main() -> None:
     client_secret: str = get_env_var("OIDC_CLIENT_SECRET")
     sbom_file: str = get_env_var("SBOM_FILE")
 
-    token = get_oidc_token(oidc_issuer_url, client_id, client_secret)
+    ssl_context = get_ssl_context()
+    token = get_oidc_token(oidc_issuer_url, client_id, client_secret, ssl_context)
 
-    if upload_sbom(rhtpa_api_url, token, sbom_file):
+    if upload_sbom(rhtpa_api_url, token, sbom_file, ssl_context):
         sys.exit(0)
     else:
         sys.exit(1)

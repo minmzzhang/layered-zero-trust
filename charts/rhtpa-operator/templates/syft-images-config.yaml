@@ -1,0 +1,36 @@
+{{- if .Values.rhtpa.syft.enabled }}
+---
+# SYFT Images Configuration
+# List of container images to scan for SBOMs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syft-images-config
+  namespace: {{ .Values.rhtpa.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "19"
+data:
+  images.txt: |
+{{- if .Values.rhtpa.syft.images }}
+  {{- if kindIs "slice" .Values.rhtpa.syft.images }}
+    {{- /* Handle YAML List */ -}}
+    {{- range .Values.rhtpa.syft.images }}
+    {{ . }}
+    {{- end }}
+  {{- else }}
+    {{- /* Handle Comma-Separated String */ -}}
+    {{- $images := .Values.rhtpa.syft.images | toString }}
+    {{- $parts := splitList "," $images }}
+    {{- range $parts }}
+      {{- $trimmed := . | trim }}
+      {{- if $trimmed }}
+    {{ $trimmed }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- else }}
+    # No images configured
+    # Add images to values.yaml: rhtpa.syft.images
+{{- end }}
+{{- end }}
+

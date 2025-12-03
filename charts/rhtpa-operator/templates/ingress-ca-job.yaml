@@ -47,16 +47,19 @@ metadata:
     argocd.argoproj.io/sync-wave: "0"
     argocd.argoproj.io/hook: PreSync
 rules:
-# Read ingress CA from router secret
+# Read ingress CA from router secret (default or custom)
 - apiGroups: [""]
   resources: ["secrets"]
-  resourceNames: ["router-certs-default"]
-  verbs: ["get"]
+  verbs: ["get", "list"]
 # Read OpenShift service CA (for NooBaa S3 TLS)
 - apiGroups: [""]
   resources: ["configmaps"]
   resourceNames: ["openshift-service-ca.crt"]
   verbs: ["get"]
+# Read ingress controller configuration to detect custom certs
+- apiGroups: ["operator.openshift.io"]
+  resources: ["ingresscontrollers"]
+  verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -96,17 +99,94 @@ spec:
         - -c
         - |
           set -e
-          echo "Extracting OpenShift ingress CA certificate..."
+          INGRESS_CA_FOUND=false
           
-          # Extract the ingress certificate from the router secret
-          oc get secret router-certs-default -n openshift-ingress -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/ingress-ca.crt
+          {{- if .Values.rhtpa.tls.ingressCA.certificate }}
+          # Use custom CA certificate provided in values
+          echo "Using custom ingress CA certificate from values..."
+          cat > /tmp/ingress-ca.crt << 'EOF'
+{{ .Values.rhtpa.tls.ingressCA.certificate }}
+          EOF
+          INGRESS_CA_FOUND=true
+          {{- else if .Values.rhtpa.tls.ingressCA.customSource.enabled }}
+          # Use custom source secret
+          echo "Extracting ingress CA from custom secret: {{ .Values.rhtpa.tls.ingressCA.customSource.secretName }}/{{ .Values.rhtpa.tls.ingressCA.customSource.secretNamespace }}..."
+          if oc get secret {{ .Values.rhtpa.tls.ingressCA.customSource.secretName }} -n {{ .Values.rhtpa.tls.ingressCA.customSource.secretNamespace }} &>/dev/null; then
+            oc get secret {{ .Values.rhtpa.tls.ingressCA.customSource.secretName }} \
+              -n {{ .Values.rhtpa.tls.ingressCA.customSource.secretNamespace }} \
+              -o jsonpath='{.data.{{ .Values.rhtpa.tls.ingressCA.customSource.secretKey }}}' | base64 -d > /tmp/ingress-ca.crt
+            INGRESS_CA_FOUND=true
+            echo "Custom ingress CA extracted successfully"
+          else
+            echo "ERROR: Custom secret {{ .Values.rhtpa.tls.ingressCA.customSource.secretName }} not found in {{ .Values.rhtpa.tls.ingressCA.customSource.secretNamespace }}"
+            exit 1
+          fi
+          {{- else }}
+          # Auto-detect ingress CA certificate
+          echo "Auto-detecting OpenShift ingress CA certificate..."
+          
+          # Try default router secret first
+          if oc get secret router-certs-default -n openshift-ingress &>/dev/null; then
+            echo "Found default router secret: router-certs-default"
+            oc get secret router-certs-default -n openshift-ingress -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/ingress-ca.crt
+            INGRESS_CA_FOUND=true
+          else
+            echo "Default router-certs-default secret not found, checking for custom ingress configuration..."
+            
+            # Check if there's a custom cert configured in the default ingresscontroller
+            CUSTOM_CERT_SECRET=$(oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.spec.defaultCertificate.name}' 2>/dev/null || echo "")
+            
+            if [ -n "$CUSTOM_CERT_SECRET" ]; then
+              echo "Found custom certificate reference in ingresscontroller: $CUSTOM_CERT_SECRET"
+              if oc get secret "$CUSTOM_CERT_SECRET" -n openshift-ingress &>/dev/null; then
+                oc get secret "$CUSTOM_CERT_SECRET" -n openshift-ingress -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/ingress-ca.crt
+                INGRESS_CA_FOUND=true
+                echo "Custom ingress CA extracted from $CUSTOM_CERT_SECRET"
+              else
+                echo "WARNING: Custom cert secret $CUSTOM_CERT_SECRET referenced but not found"
+              fi
+            fi
+            
+            # Try other common secret names as fallback
+            if [ "$INGRESS_CA_FOUND" = "false" ]; then
+              for SECRET_NAME in custom-certs-default ingress-certs-default router-certs; do
+                if oc get secret "$SECRET_NAME" -n openshift-ingress &>/dev/null; then
+                  echo "Found alternative secret: $SECRET_NAME"
+                  oc get secret "$SECRET_NAME" -n openshift-ingress -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/ingress-ca.crt
+                  INGRESS_CA_FOUND=true
+                  break
+                fi
+              done
+            fi
+          fi
+          
+          if [ "$INGRESS_CA_FOUND" = "false" ]; then
+            echo "ERROR: Could not find ingress CA certificate."
+            echo "Please provide a custom CA certificate using one of these methods:"
+            echo "  1. Set rhtpa.tls.ingressCA.certificate with PEM-encoded CA"
+            echo "  2. Enable rhtpa.tls.ingressCA.customSource and specify secret details"
+            echo "  3. Ensure OpenShift ingress has a valid certificate configuration"
+            exit 1
+          fi
+          {{- end }}
+          
+          # Verify the certificate is valid (if openssl is available)
+          if command -v openssl &>/dev/null; then
+            if ! openssl x509 -in /tmp/ingress-ca.crt -noout &>/dev/null; then
+              echo "ERROR: Extracted certificate is not valid"
+              exit 1
+            fi
+            echo "Certificate validation passed"
+          else
+            echo "WARNING: openssl not available, skipping certificate validation"
+          fi
           
           # Create or update the ingress CA ConfigMap (for backward compatibility)
           oc create configmap rhtpa-ingress-ca -n {{ .Values.rhtpa.namespace }} \
             --from-file=ca.crt=/tmp/ingress-ca.crt \
             --dry-run=client -o yaml | oc apply -f -
           
-          echo "Ingress CA certificate extracted"
+          echo "Ingress CA certificate extracted and stored in ConfigMap"
           
           # Extract the OpenShift service CA (for NooBaa S3 and other internal services)
           echo "Extracting OpenShift service CA certificate..."

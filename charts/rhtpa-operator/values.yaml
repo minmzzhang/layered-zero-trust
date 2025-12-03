@@ -48,7 +48,15 @@ rhtpa:
   tls:
     ingressCA:
       enabled: true  # Mount OpenShift ingress CA certificate
-      certificate: ""  # PEM-encoded certificate (will be populated from ingress secret)
+      certificate: ""  # PEM-encoded certificate (optional: provide custom CA directly)
+      # Custom ingress CA source (optional)
+      # If certificate is provided above, these settings are ignored
+      # If not provided, the job will attempt to auto-detect from OpenShift ingress
+      customSource:
+        enabled: false
+        secretName: ""  # Name of secret containing the CA certificate
+        secretNamespace: ""  # Namespace of the secret
+        secretKey: "tls.crt"  # Key in the secret containing the certificate
 
   # NEW: Module Configuration (Ported from AWS Config)
   modules:

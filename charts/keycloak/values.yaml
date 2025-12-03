@@ -42,6 +42,17 @@ keycloak:
           included.client.audience: trusted-artifact-signer
           access.token.claim: 'true'
           id.token.claim: 'false'
+      - name: email-mapper
+        protocol: openid-connect
+        protocolMapper: oidc-hardcoded-claim-mapper
+        consentRequired: false
+        config:
+          claim.name: email_verified
+          claim.value: 'true'
+          jsonType.label: boolean
+          access.token.claim: 'true'
+          id.token.claim: 'true'
+          userinfo.token.claim: 'false'
     # RHTPA CLI Client - matches Trustify 'cli' client configuration
     # Reference: https://github.com/guacsec/trustify-helm-charts/blob/main/charts/trustify-infrastructure/templates/keycloak/010-ConfigMap.yaml
     - clientId: rhtpa-cli

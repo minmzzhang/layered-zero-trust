@@ -1,97 +1,158 @@
 {{- if .Values.rhtpa.enabled }}
 ---
-# Service account for the rhtpa-cr-creator job
-apiVersion: v1
-kind: ServiceAccount
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
 metadata:
-  name: rhtpa-cr-creator
+  name: policy-rhtpa-trustedprofileanalyzer
   namespace: {{ .Values.rhtpa.namespace }}
   labels:
     {{- include "rhtpa-operator.labels" . | nindent 4 }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "18"
----
-# Role for creating TrustedProfileAnalyzer CR
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: rhtpa-cr-creator
-  namespace: {{ .Values.rhtpa.namespace }}
-  labels:
-    {{- include "rhtpa-operator.labels" . | nindent 4 }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "18"
-rules:
-- apiGroups: ["rhtpa.io"]
-  resources: ["trustedprofileanalyzers"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list"]
----
-# RoleBinding for the rhtpa-cr-creator service account
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: rhtpa-cr-creator
-  namespace: {{ .Values.rhtpa.namespace }}
-  labels:
-    {{- include "rhtpa-operator.labels" . | nindent 4 }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "18"
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: rhtpa-cr-creator
-subjects:
-- kind: ServiceAccount
-  name: rhtpa-cr-creator
-  namespace: {{ .Values.rhtpa.namespace }}
----
-# Job to create TrustedProfileAnalyzer CR with the bucket name from OBC
-# Only the bucket name needs substitution - credentials use valueFrom which is supported
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: rhtpa-cr-creator
-  namespace: {{ .Values.rhtpa.namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "20"
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
 spec:
-  backoffLimit: 10
-  template:
-    metadata:
-      name: rhtpa-cr-creator
-    spec:
-      serviceAccountName: rhtpa-cr-creator
-      restartPolicy: OnFailure
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: policy-rhtpa-trustedprofileanalyzer
+        spec:
+          remediationAction: enforce
+          severity: high
+          object-templates-raw: |
+{{- $template := .Files.Get "files/trustedprofileanalyzer-template.yaml" }}
+{{- $template = replace "OBC_NAME" .Values.rhtpa.objectStorage.objectBucketClaim.name $template }}
+{{- $template = replace "DATABASE_NAME" .Values.rhtpa.database.name $template }}
+{{- $template = replace "APP_DOMAIN" (printf "%s.%s" (.Values.rhtpa.routePrefix | default "trustify") .Values.global.localClusterDomain) $template }}
+{{- $template = replace "S3_ENDPOINT" (printf "https://%s" .Values.rhtpa.objectStorage.endpoint) $template }}
+{{- /* Replace labels - must be done before RHTPA_NAMESPACE to avoid conflicts */ -}}
+{{- $labels := include "rhtpa-operator.labels" . | replace "\n" "\n        " }}
+{{- $template = replace "RHTPA_LABELS" $labels $template }}
+{{- /* Now safe to replace RHTPA_NAMESPACE and RHTPA_NAME */ -}}
+{{- $template = replace "RHTPA_NAMESPACE" .Values.rhtpa.namespace $template }}
+{{- $template = replace "RHTPA_NAME" .Values.rhtpa.name $template }}
+{{- /* TLS Config */ -}}
+{{- if and .Values.rhtpa.tls .Values.rhtpa.tls.ingressCA .Values.rhtpa.tls.ingressCA.enabled }}
+{{- $tlsConfig := "tls:\n        additionalTrustAnchor: /etc/rhtpa/tls/combined-ca.crt" }}
+{{- $template = replace "TLS_CONFIG" $tlsConfig $template }}
+{{- else }}
+{{- $template = replace "TLS_CONFIG" "" $template }}
+{{- end }}
+{{- /* OIDC Config */ -}}
+{{- if and .Values.rhtpa.zeroTrust .Values.rhtpa.zeroTrust.keycloak .Values.rhtpa.zeroTrust.keycloak.enabled }}
+{{- /* Construct Keycloak URL from global.localClusterDomain if not provided */ -}}
+{{- $keycloakUrl := .Values.rhtpa.zeroTrust.keycloak.url }}
+{{- if not $keycloakUrl }}
+{{- $keycloakUrl = printf "https://keycloak.%s" .Values.global.localClusterDomain }}
+{{- end }}
+{{- $oidcConfig := printf `oidc:
+        clients:
+          frontend:
+            clientId: %s
+            issuerUrl: %s/realms/%s
+          cli:
+            clientId: %s
+            issuerUrl: %s/realms/%s
+            clientSecret:
+              valueFrom:
+                secretKeyRef:
+                  name: %s
+                  key: client-secret` .Values.rhtpa.zeroTrust.keycloak.clients.frontend.clientId $keycloakUrl .Values.rhtpa.zeroTrust.keycloak.realm .Values.rhtpa.zeroTrust.keycloak.clients.cli.clientId $keycloakUrl .Values.rhtpa.zeroTrust.keycloak.realm .Values.rhtpa.zeroTrust.keycloak.clients.cli.secretName }}
+{{- $template = replace "OIDC_CONFIG" $oidcConfig $template }}
+{{- else }}
+{{- $template = replace "OIDC_CONFIG" "" $template }}
+{{- end }}
+{{- /* Modules Config */ -}}
+{{- if and .Values.rhtpa.modules .Values.rhtpa.modules.createImporters .Values.rhtpa.modules.createImporters.enabled }}
+{{- $createDB := .Values.rhtpa.modules.createDatabase.enabled | default true }}
+{{- $createImporters := .Values.rhtpa.modules.createImporters.enabled | default true }}
+{{- $importerReplicas := .Values.rhtpa.modules.importer.replicas | default 1 | int }}
+{{- $importerCPU := .Values.rhtpa.modules.importer.resources.requests.cpu | default 0.5 | toString }}
+{{- $importerMemory := .Values.rhtpa.modules.importer.resources.requests.memory | default "4Gi" | toString }}
+{{- $serverReplicas := .Values.rhtpa.modules.server.replicas | default 1 | int }}
+{{- $serverCPU := .Values.rhtpa.modules.server.resources.requests.cpu | default 0.5 | toString }}
+{{- $serverMemory := .Values.rhtpa.modules.server.resources.requests.memory | default "4Gi" | toString }}
+{{- $modulesConfig := printf "modules:\n        migrateDatabase:\n          enabled: true\n        createDatabase:\n          enabled: %t\n        createImporters:\n          enabled: %t\n          importers:" $createDB $createImporters }}
+{{- if .Values.rhtpa.modules.createImporters.importers }}
+{{- $importersYaml := toYaml .Values.rhtpa.modules.createImporters.importers | nindent 12 }}
+{{- $modulesConfig = printf "%s\n%s" $modulesConfig $importersYaml }}
+{{- end }}
+{{- $modulesConfig = printf "%s\n        importer:\n          replicas: %d\n          resources:\n            requests:\n              cpu: \"%s\"\n              memory: %s\n          enabled: true\n        server:\n          replicas: %d\n          resources:\n            requests:\n              cpu: \"%s\"\n              memory: %s\n          enabled: true" $modulesConfig $importerReplicas $importerCPU $importerMemory $serverReplicas $serverCPU $serverMemory }}
+{{- $template = replace "MODULES_CONFIG" $modulesConfig $template }}
+{{- else }}
+{{- $template = replace "MODULES_CONFIG" "" $template }}
+{{- end }}
+{{- /* Sigstore Config */ -}}
+{{- if and .Values.rhtpa.zeroTrust .Values.rhtpa.zeroTrust.sigstore .Values.rhtpa.zeroTrust.sigstore.enabled }}
+{{- $sigstoreConfig := printf `sigstore:
+        fulcio:
+          url: %s
+        rekor:
+          url: %s
+        tuf:
+          enabled: %t` .Values.rhtpa.zeroTrust.sigstore.fulcio.url .Values.rhtpa.zeroTrust.sigstore.rekor.url .Values.rhtpa.zeroTrust.sigstore.tuf.enabled }}
+{{- $template = replace "SIGSTORE_CONFIG" $sigstoreConfig $template }}
+{{- else }}
+{{- $template = replace "SIGSTORE_CONFIG" "" $template }}
+{{- end }}
+{{- /* Extra Volumes Config */ -}}
+{{- if and .Values.rhtpa.tls .Values.rhtpa.tls.ingressCA .Values.rhtpa.tls.ingressCA.enabled }}
+{{- $extraVolumesConfig := `extraVolumes:
+        - name: combined-ca
+          configMap:
+            name: rhtpa-combined-ca
       
-      containers:
-      - name: create-cr
-        image: registry.redhat.io/openshift4/ose-cli:latest
-        command: ["/bin/bash", "/scripts/create-cr.sh"]
-        env:
-        - name: NAMESPACE
-          value: {{ .Values.rhtpa.namespace }}
-        - name: OBC_NAME
-          value: {{ .Values.rhtpa.objectStorage.objectBucketClaim.name }}
-        volumeMounts:
-        - name: cr-template
-          mountPath: /templates
-          readOnly: true
-        - name: scripts
-          mountPath: /scripts
-          readOnly: true
-      
-      volumes:
-      - name: cr-template
-        configMap:
-          name: rhtpa-cr-template
-      - name: scripts
-        configMap:
-          name: rhtpa-cr-creator-script
-          defaultMode: 0755
+      extraVolumeMounts:
+        - name: combined-ca
+          mountPath: /etc/rhtpa/tls
+          readOnly: true` }}
+{{- $template = replace "EXTRA_VOLUMES_CONFIG" $extraVolumesConfig $template }}
+{{- else }}
+{{- $template = replace "EXTRA_VOLUMES_CONFIG" "" $template }}
+{{- end }}
+{{ $template | nindent 12 }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-policy-rhtpa-trustedprofileanalyzer
+  namespace: {{ .Values.rhtpa.namespace }}
+  labels:
+    {{- include "rhtpa-operator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+placementRef:
+  name: placement-policy-rhtpa-trustedprofileanalyzer
+  kind: PlacementRule
+  apiGroup: apps.open-cluster-management.io
+subjects:
+  - name: policy-rhtpa-trustedprofileanalyzer
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: PlacementRule
+metadata:
+  name: placement-policy-rhtpa-trustedprofileanalyzer
+  namespace: {{ .Values.rhtpa.namespace }}
+  labels:
+    {{- include "rhtpa-operator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  clusterConditions:
+    - status: "True"
+      type: ManagedClusterConditionAvailable
+  clusterSelector:
+    matchExpressions:
+      - key: name
+        operator: In
+        values:
+          - local-cluster
 {{- end }}
 

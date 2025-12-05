@@ -1,0 +1,60 @@
+{{- /* Wait for OBC ConfigMap to exist before creating the CR */ -}}
+{{- $obcConfigMap := lookup "v1" "ConfigMap" "RHTPA_NAMESPACE" "OBC_NAME" }}
+{{- if $obcConfigMap }}
+{{- $bucketName := index $obcConfigMap.data "BUCKET_NAME" }}
+{{- if $bucketName }}
+- complianceType: musthave
+  objectDefinition:
+    apiVersion: rhtpa.io/v1
+    kind: TrustedProfileAnalyzer
+    metadata:
+      name: RHTPA_NAME
+      namespace: RHTPA_NAMESPACE
+      labels:
+        RHTPA_LABELS
+    spec:
+      appDomain: "APP_DOMAIN"
+      TLS_CONFIG
+      OIDC_CONFIG
+      createDatabase:
+        name: DATABASE_NAME
+        username: rhtpa
+        password:
+          valueFrom:
+            secretKeyRef:
+              name: rhtpa-db-secret
+              key: password
+      migrateDatabase: {}
+      MODULES_CONFIG
+      SIGSTORE_CONFIG
+      database:
+        host: rhtpa-db.RHTPA_NAMESPACE.svc.cluster.local
+        name: DATABASE_NAME
+        username:
+          valueFrom:
+            secretKeyRef:
+              name: rhtpa-db-secret
+              key: username
+        password:
+          valueFrom:
+            secretKeyRef:
+              name: rhtpa-db-secret
+              key: password
+      storage:
+        type: s3
+        accessKey:
+          valueFrom:
+            secretKeyRef:
+              name: OBC_NAME
+              key: AWS_ACCESS_KEY_ID
+        secretKey:
+          valueFrom:
+            secretKeyRef:
+              name: OBC_NAME
+              key: AWS_SECRET_ACCESS_KEY
+        bucket: "{{ $bucketName }}"
+        region: "S3_ENDPOINT"
+        pathStyle: true
+      EXTRA_VOLUMES_CONFIG
+{{- end }}
+{{- end }}

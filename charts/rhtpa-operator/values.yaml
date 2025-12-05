@@ -20,9 +20,6 @@ rhtpa:
   
   # Zero Trust Integration
   zeroTrust:
-    spire:
-      enabled: true
-      trustDomain: "apps.example.com"
     vault:
       enabled: true
       url: "https://vault.vault.svc.cluster.local:8200" 
@@ -31,7 +28,7 @@ rhtpa:
       secretPath: "secret/data/global/rhtpa"
     keycloak:
       enabled: true
-      url: "https://keycloak.apps.example.com"  # MUST be public route URL (overridden in values-hub.yaml)
+      url: ""  # Constructed dynamically from global.localClusterDomain in templates
       realm: "ztvp"
       namespace: "keycloak-system"  # Namespace where Keycloak is deployed
       instanceName: "keycloak"  # Name of the Keycloak CR
@@ -48,8 +45,10 @@ rhtpa:
   tls:
     ingressCA:
       enabled: true  # Mount OpenShift ingress CA certificate
-      certificate: ""  # PEM-encoded certificate (optional, leave empty for auto-detection)
-      # Optional: Specify a custom source secret for ingress CA
+      certificate: ""  # PEM-encoded certificate (optional: provide custom CA directly)
+      # Custom ingress CA source (optional)
+      # If certificate is provided above, these settings are ignored
+      # If not provided, the job will attempt to auto-detect from OpenShift ingress
       customSource:
         enabled: false  # Enable to use a custom secret instead of auto-detection
         secretName: ""  # Name of the secret containing the CA certificate
@@ -136,7 +135,6 @@ rhtpa:
   # External access configuration
   externalAccess:
     enabled: true
-
 # Global Configuration
 global:
   imageRegistry: registry.redhat.io

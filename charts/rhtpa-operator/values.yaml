@@ -85,6 +85,18 @@ rhtpa:
             fetchRetries: 50
             period: 1d
             source: redhat.com
+        quay-redhat-user-workloads:
+          quay:
+            description: SBOMs from konflux image attachments
+            disabled: true  # Enable to import Konflux/RHTAP SBOMs from Quay.io
+            period: 1d
+            registry: quay.io
+        redhat-sboms:
+          sbom:
+            description: All Red Hat SBOMs
+            disabled: true  # Enable if needed (large download)
+            period: 1d
+            source: https://access.redhat.com/security/data/sbom/beta/
 
     # Configure Importer Runtime
     importer:

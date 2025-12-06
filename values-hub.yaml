@@ -291,6 +291,16 @@ clusterGroup:
           value: "1d"  # CVE importer period: 1 day
         - name: rhtpa.modules.createImporters.importers.osv-github.osv.period
           value: "1d"  # OSV-GitHub importer period: 1 day
+        # Additional Importers (disabled by default due to large datasets)
+        # Enable Red Hat CSAF data importer (security advisories)
+        - name: rhtpa.modules.createImporters.importers.redhat-csaf.csaf.disabled
+          value: "false"
+        # Enable Quay Red Hat user workloads importer (Konflux/RHTAP SBOMs)
+        - name: rhtpa.modules.createImporters.importers.quay-redhat-user-workloads.quay.disabled
+          value: "false"
+        # Enable Red Hat SBOMs importer (official Red Hat SBOMs)
+        - name: rhtpa.modules.createImporters.importers.redhat-sboms.sbom.disabled
+          value: "false"
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets

@@ -27,13 +27,13 @@ clusterGroup:
         operatorGroup: true
         targetNamespace: cert-manager-operator
     # Layer 1: Storage and Registry
-    # Required for RHTPA (provides NooBaa object storage backend)
-    - openshift-storage:
-        operatorGroup: true
-        targetNamespace: openshift-storage
-        annotations:
-          openshift.io/cluster-monitoring: "true"
-          argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
+    # Required for RHTPA and QUAY (provides NooBaa object storage backend)
+    # - openshift-storage:
+    #     operatorGroup: true
+    #     targetNamespace: openshift-storage
+    #     annotations:
+    #       openshift.io/cluster-monitoring: "true"
+    #       argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
     # - quay-enterprise:
     #     annotations:
     #       argocd.argoproj.io/sync-wave: "1"  # Create before NooBaa and all Quay components
@@ -46,16 +46,16 @@ clusterGroup:
     #       argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
     #     labels:
     #       openshift.io/cluster-monitoring: "true"
-    - rhtpa-operator:
-        operatorGroup: true
-        targetNamespace: rhtpa-operator
-        annotations:
-          argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
-    - trusted-profile-analyzer:
-        annotations:
-          argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
-        labels:
-          openshift.io/cluster-monitoring: "true"
+    # - rhtpa-operator:
+    #     operatorGroup: true
+    #     targetNamespace: rhtpa-operator
+    #     annotations:
+    #       argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
+    # - trusted-profile-analyzer:
+    #     annotations:
+    #       argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
+    #     labels:
+    #       openshift.io/cluster-monitoring: "true"
     - zero-trust-workload-identity-manager:
         operatorGroup: true
         targetNamespace: zero-trust-workload-identity-manager
@@ -94,14 +94,14 @@ clusterGroup:
         nodeSelector:
           node-role.kubernetes.io/worker: ""
     # Storage and Registry operator subscriptions
-    # Required for RHTPA (provides NooBaa object storage backend)
+    # Required for RHTPA and QUAY (provides NooBaa object storage backend)
     # ODF provides object storage backend (NooBaa) for RHTPA and optionally Quay
-    odf:
-      name: odf-operator
-      namespace: openshift-storage
-      channel: stable-4.19
-      annotations:
-        argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5)
+    # odf:
+    #   name: odf-operator
+    #   namespace: openshift-storage
+    #   channel: stable-4.19
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5)
     # quay-operator:
     #   name: quay-operator
     #   namespace: openshift-operators
@@ -120,13 +120,13 @@ clusterGroup:
     # RHTPA operator subscription
     # Channel: stable-v1.1 provides latest 1.1.x patch updates
     # Note: No direct upgrade path from 1.1.x to 2.x (requires fresh install)
-    rhtpa-operator:
-      name: rhtpa-operator
-      namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
-      channel: stable-v1.1  # Use stable-v1.1 channel for 1.1.x updates
-      catalogSource: redhat-operators
-      annotations:
-        argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5), before applications
+    # rhtpa-operator:
+    #   name: rhtpa-operator
+    #   namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
+    #   channel: stable-v1.1  # Use stable-v1.1 channel for 1.1.x updates
+    #   catalogSource: redhat-operators
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5), before applications
   projects:
     - hub
   # Explicitly mention the cluster-state based overrides we plan to use for this pattern.
@@ -206,21 +206,21 @@ clusterGroup:
             policies:
               - global-secret
           # RHTPA vault role
-          - name: rhtpa
-            audience: rhtpa
-            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/rhtpa
-            policies:
-              - global-secret
+          # - name: rhtpa
+          #   audience: rhtpa
+          #   subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/rhtpa
+          #   policies:
+          #     - global-secret
     # Shared Object Storage Backend
-    # Required for RHTPA (provides S3-compatible storage via NooBaa MCG)
+    # Required for RHTPA and QUAY (provides S3-compatible storage via NooBaa MCG)
     # NooBaa MCG provides S3-compatible object storage for multiple applications
-    noobaa-mcg:
-      name: noobaa-mcg
-      namespace: openshift-storage
-      project: hub
-      path: charts/noobaa-mcg
-      annotations:
-        argocd.argoproj.io/sync-wave: "5"  # Deploy after core services
+    # noobaa-mcg:
+    #   name: noobaa-mcg
+    #   namespace: openshift-storage
+    #   project: hub
+    #   path: charts/noobaa-mcg
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "5"  # Deploy after core services
     # Quay Container Registry (uses NooBaa for storage)
     # quay-registry:
     #   name: quay-registry
@@ -255,53 +255,54 @@ clusterGroup:
     #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}/realms/ztvp
     # RHTPA (Red Hat Trusted Profile Analyzer) with SPIFFE Integration
     # Depends on: NooBaa MCG (storage), Vault (secrets), SPIRE (identity), Keycloak (auth)
-    trusted-profile-analyzer:
-      name: trusted-profile-analyzer
-      namespace: trusted-profile-analyzer
-      project: hub
-      path: charts/rhtpa-operator
-      annotations:
-        argocd.argoproj.io/sync-wave: "10"  # Create chart resources (OBC, DB, etc.)
-        # Note: The TrustedProfileAnalyzer CR is created by ACM Policy at wave 50
-        # to ensure the operator is fully ready (mitigates v1.1.0 initialization bug)
-      # Ignore differences to prevent OutOfSync status
-      ignoreDifferences:
-        # Ignore Job status changes (completion, failure counts, conditions)
-        # Jobs are created by hooks and their status changes don't require re-sync
-        - group: batch
-          kind: Job
-          jsonPointers:
-            - /status
-      overrides:
-        - name: rhtpa.zeroTrust.vault.url
-          value: https://vault.vault.svc.cluster.local:8200
-        # Keycloak URL is automatically constructed from global.localClusterDomain
-        # TLS Configuration - Custom Ingress CA (for Azure/AWS/GCP with custom certs)
-        # For standard OpenShift deployments, auto-detection works without overrides
-        # For cloud platforms with custom ingress certs in non-standard locations:
-        # - name: rhtpa.tls.ingressCA.customSource.enabled
-        #   value: "true"
-        # - name: rhtpa.tls.ingressCA.customSource.secretName
-        #   value: "custom-ingress-cert"
-        # - name: rhtpa.tls.ingressCA.customSource.secretNamespace
-        #   value: "openshift-ingress"
-        # - name: rhtpa.tls.ingressCA.customSource.secretKey
-        #   value: "tls.crt"
-        # Importer Configuration
-        # Enable all 5 importers explicitly (chart defaults: cve and osv-github enabled)
-        # Period defaults to 1d for all importers (configured in chart)
-        # Default importers
-        - name: rhtpa.modules.createImporters.importers.cve.cve.disabled
-          value: "false"
-        - name: rhtpa.modules.createImporters.importers.osv-github.osv.disabled
-          value: "false"
-        # Additional importers (disabled by default due to large datasets)
-        - name: rhtpa.modules.createImporters.importers.redhat-csaf.csaf.disabled
-          value: "false"
-        - name: rhtpa.modules.createImporters.importers.quay-redhat-user-workloads.quay.disabled
-          value: "false"
-        - name: rhtpa.modules.createImporters.importers.redhat-sboms.sbom.disabled
-          value: "false"
+    # trusted-profile-analyzer:
+    #   name: trusted-profile-analyzer
+    #   namespace: trusted-profile-analyzer
+    #   project: hub
+    #   path: charts/rhtpa-operator
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "10"  # Create chart resources (OBC, DB, etc.)
+    #     # Note: The TrustedProfileAnalyzer CR is created by ACM Policy at wave 50
+    #     # to ensure the operator is fully ready (mitigates v1.1.0 initialization bug)
+    #   # Ignore differences to prevent OutOfSync status
+    #   ignoreDifferences:
+    #     # Ignore Job status changes (completion, failure counts, conditions)
+    #     # Jobs are created by hooks and their status changes don't require re-sync
+    #     - group: batch
+    #       kind: Job
+    #       jsonPointers:
+    #         - /status
+    #   overrides:
+    #     # Vault Integration
+    #     # - name: rhtpa.zeroTrust.vault.url
+    #     #   value: https://vault.vault.svc.cluster.local:8200
+    #     # Keycloak URL is automatically constructed from global.localClusterDomain
+    #     # TLS Configuration - Custom Ingress CA (for Azure/AWS/GCP with custom certs)
+    #     # For standard OpenShift deployments, auto-detection works without overrides
+    #     # For cloud platforms with custom ingress certs in non-standard locations:
+    #     # - name: rhtpa.tls.ingressCA.customSource.enabled
+    #     #   value: "true"
+    #     # - name: rhtpa.tls.ingressCA.customSource.secretName
+    #     #   value: "custom-ingress-cert"
+    #     # - name: rhtpa.tls.ingressCA.customSource.secretNamespace
+    #     #   value: "openshift-ingress"
+    #     # - name: rhtpa.tls.ingressCA.customSource.secretKey
+    #     #   value: "tls.crt"
+    #     # Importer Configuration
+    #     # Enable all 5 importers explicitly (chart defaults: cve and osv-github enabled)
+    #     # Period defaults to 1d for all importers (configured in chart)
+    #     # Default importers
+    #     # - name: rhtpa.modules.createImporters.importers.cve.cve.disabled
+    #     #   value: "false"
+    #     # - name: rhtpa.modules.createImporters.importers.osv-github.osv.disabled
+    #     #   value: "false"
+    #     # Additional importers (disabled by default due to large datasets)
+    #     # - name: rhtpa.modules.createImporters.importers.redhat-csaf.csaf.disabled
+    #     #   value: "false"
+    #     # - name: rhtpa.modules.createImporters.importers.quay-redhat-user-workloads.quay.disabled
+    #     #   value: "false"
+    #     # - name: rhtpa.modules.createImporters.importers.redhat-sboms.sbom.disabled
+    #     #   value: "false"
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets

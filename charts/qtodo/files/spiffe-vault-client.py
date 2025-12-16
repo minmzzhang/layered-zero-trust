@@ -28,6 +28,12 @@ class VaultCredentialManager:
         self.credentials_file = os.getenv(
             "CREDENTIALS_FILE", "/etc/credentials.properties"
         )
+        # ZTVP trusted CA bundle (preferred)
+        self.ztvp_ca_bundle = os.getenv(
+            "ZTVP_CA_BUNDLE",
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        )
+        # Service CA (fallback for backward compatibility)
         self.service_ca_file = os.getenv(
             "SERVICE_CA_FILE",
             "/run/secrets/kubernetes.io/serviceaccount/service-ca.crt",
@@ -54,6 +60,7 @@ class VaultCredentialManager:
         logger.info("  VAULT_ROLE: %s", self.vault_role)
         logger.info("  DB_USERNAME: %s", self.db_username)
         logger.info("  CREDENTIALS_FILE: %s", self.credentials_file)
+        logger.info("  ZTVP_CA_BUNDLE: %s", self.ztvp_ca_bundle)
         logger.info("  SERVICE_CA_FILE: %s", self.service_ca_file)
         logger.info("  JWT_TOKEN_FILE: %s", self.jwt_token_file)
 
@@ -63,10 +70,22 @@ class VaultCredentialManager:
 
         # Setup SSL context for CA verification
         self.ssl_context = ssl.create_default_context()
-        if os.path.exists(self.service_ca_file):
+
+        # Try ZTVP CA bundle first (contains both ingress and service CAs)
+        if os.path.exists(self.ztvp_ca_bundle):
+            self.ssl_context.load_verify_locations(self.ztvp_ca_bundle)
+            logger.info("Loaded ZTVP trusted CA bundle from: %s", self.ztvp_ca_bundle)
+        # Fallback to service CA only (for backward compatibility)
+        elif os.path.exists(self.service_ca_file):
             self.ssl_context.load_verify_locations(self.service_ca_file)
+            logger.info("Loaded service CA from: %s", self.service_ca_file)
         else:
-            logger.warning("Service CA file not found, using default SSL context")
+            logger.warning(
+                "No CA certificates found at %s or %s. "
+                "Using default SSL context. SSL verification may fail.",
+                self.ztvp_ca_bundle,
+                self.service_ca_file,
+            )
 
     def _make_http_request(
         self, url, method="GET", data=None, headers=None, timeout=30
@@ -111,11 +130,11 @@ class VaultCredentialManager:
                 "text": error_data,
                 "json": lambda: (json.loads(error_data) if error_data else {}),
             }
-        except URLError as e:
-            logger.error("URL Error: %s", e)
+        except URLError:
+            logger.error("URL Error occurred")
             raise
-        except Exception as e:
-            logger.error("Request error: %s", e)
+        except Exception:
+            logger.error("Request error occurred")
             raise
 
     def get_spiffe_token(self):
@@ -125,8 +144,8 @@ class VaultCredentialManager:
                 jwt_svid = source.read()
                 logger.info("Successfully retrieved SPIFFE JWT token")
                 return jwt_svid
-        except Exception as e:
-            logger.error("Failed to retrieve SPIFFE token: %s", e)
+        except Exception:
+            logger.error("Failed to retrieve SPIFFE token")
             raise
 
     def authenticate_with_vault(self):
@@ -167,8 +186,8 @@ class VaultCredentialManager:
 
             return True
 
-        except Exception as e:
-            logger.error("Vault authentication error: %s", e)
+        except Exception:
+            logger.error("Vault authentication error occurred")
             raise
 
     def retrieve_vault_secret(self):
@@ -204,8 +223,8 @@ class VaultCredentialManager:
 
             return secret_data
 
-        except Exception as e:
-            logger.error("Secret retrieval error: %s", e)
+        except Exception:
+            logger.error("Secret retrieval error occurred")
             raise
 
     def extract_credentials(self, secret_data):
@@ -222,8 +241,8 @@ class VaultCredentialManager:
             credentials["db-username"] = self.db_username
             return credentials
 
-        except Exception as e:
-            logger.error("Credential extraction error: %s", e)
+        except Exception:
+            logger.error("Credential extraction error occurred")
             raise
 
     def write_properties_file(self, credentials):
@@ -243,8 +262,8 @@ class VaultCredentialManager:
 
             logger.info("Credentials written to %s", self.credentials_file)
 
-        except Exception as e:
-            logger.error("Error writing properties file: %s", e)
+        except Exception:
+            logger.error("Error writing properties file")
             raise
 
     def is_token_renewal_needed(self):
@@ -291,8 +310,8 @@ class VaultCredentialManager:
                 )
                 return False
 
-        except Exception as e:
-            logger.warning("Token renewal error: %s. Re-authenticating...", e)
+        except Exception:
+            logger.warning("Token renewal error occurred. Re-authenticating...")
             return False
 
     def run(self, init=False):
@@ -329,8 +348,8 @@ class VaultCredentialManager:
             except KeyboardInterrupt:
                 logger.info("Received interrupt signal, shutting down...")
                 break
-            except Exception as e:
-                logger.error("Error in main loop: %s", e)
+            except Exception:
+                logger.error("Error in main loop")
                 logger.info("Retrying in 60 seconds...")
                 time.sleep(60)
 
@@ -352,7 +371,7 @@ def main():
         manager = VaultCredentialManager()
         manager.run(args.init)
     except Exception as e:
-        logger.error("Failed to start credential manager: %s", e)
+        logger.error("Failed to start credential manager")
         raise SystemExit(1) from e
 
 

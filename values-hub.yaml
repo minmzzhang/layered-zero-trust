@@ -156,6 +156,46 @@ clusterGroup:
   #   - '/overrides/values-{{ $.Values.global.hubClusterDomain }}.yaml'
   #   - '/overrides/values-{{ $.Values.global.localClusterDomain }}.yaml'
   applications:
+    ztvp-certificates:
+      name: ztvp-certificates
+      namespace: openshift-config
+      project: hub
+      path: charts/ztvp-certificates
+      annotations:
+        argocd.argoproj.io/sync-wave: "-10"
+      # Use extraValueFiles for complex nested structures like additionalCertificates and rollout
+      # The validated patterns framework only processes 'overrides' as --set parameters
+      # Edit /overrides/values-ztvp-certificates.yaml to configure:
+      #   - Additional CA certificates (additionalCertificates array)
+      #   - Automatic rollout restart for consuming applications
+      extraValueFiles:
+        - /overrides/values-ztvp-certificates.yaml
+      overrides:
+        # Job TTL: Retention time for completed CA extraction jobs
+        # Default: 300s (5 min). Extended for debugging/verification.
+        - name: job.ttlSecondsAfterFinished
+          value: "900"  # 15 minutes
+        
+        # Debug settings: Enable for troubleshooting certificate extraction issues
+        # verbose: Enables bash 'set -x' for detailed script execution logging
+        # keepFailedJobs: Prevents failed jobs from auto-cleanup (useful for debugging)
+        # - name: debug.verbose
+        #   value: "true"
+        # - name: debug.keepFailedJobs
+        #   value: "true"
+        
+        # Primary custom CA: Use secretRef to reference an existing Kubernetes secret
+        # containing CA certificates. Uncomment to enable:
+        # Create secret: oc create secret generic custom-ca-bundle \
+        #   --from-file=ca.crt=/path/to/ca.crt -n openshift-config
+        # - name: customCA.secretRef.enabled
+        #   value: "true"
+        # - name: customCA.secretRef.name
+        #   value: custom-ca-bundle
+        # - name: customCA.secretRef.namespace
+        #   value: openshift-config
+        # - name: customCA.secretRef.key
+        #   value: ca.crt
     acm:
       name: acm
       namespace: open-cluster-management

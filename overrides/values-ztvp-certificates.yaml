@@ -1,0 +1,34 @@
+# Additional CA certificates for ztvp-certificates chart
+# This file is referenced via extraValueFiles in values-hub.yaml
+#
+# To add additional certificates:
+# 1. Create the secret: oc create secret generic <name> --from-file=ca.crt=/path/to/cert.crt -n openshift-config
+# 2. Uncomment and update additionalCertificates below
+# 3. Trigger ArgoCD sync
+
+# Additional CA certificates (uncomment and configure as needed)
+# customCA:
+#   additionalCertificates:
+#     - name: corporate-root-ca
+#       secretRef:
+#         name: corporate-root-ca
+#         namespace: openshift-config
+#         key: ca.crt
+#     - name: partner-ca
+#       secretRef:
+#         name: partner-ca
+#         namespace: openshift-config
+#         key: ca.crt
+
+# Automatic rollout configuration for applications consuming certificates
+# When enabled, deployments with the label 'ztvp.io/uses-certificates: true'
+# will be automatically restarted when certificates are updated
+rollout:
+  enabled: true
+  strategy: labeled
+  labelSelector:
+    ztvp.io/uses-certificates: "true"
+  resourceKinds:
+    - Deployment
+    - StatefulSet
+

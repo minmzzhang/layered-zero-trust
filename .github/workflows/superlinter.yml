@@ -31,6 +31,8 @@ jobs:
           VALIDATE_ALL_CODEBASE: true
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Exclude bash scripts with Helm templating (they contain {{ }} syntax)
+          FILTER_REGEX_EXCLUDE: .*\.sh\.tpl$
           # These are the validation we disable atm
           VALIDATE_ANSIBLE: false
           VALIDATE_BASH: false

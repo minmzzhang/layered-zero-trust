@@ -1,0 +1,19 @@
+apiVersion: v2
+name: ztvp-certificates
+description: Global CA certificate management for ZTVP pattern components
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - certificates
+  - tls
+  - ssl
+  - ca-bundle
+  - zero-trust
+home: https://github.com/validatedpatterns/layered-zero-trust
+sources:
+  - https://github.com/validatedpatterns/layered-zero-trust
+maintainers:
+  - name: Zero Trust Validated Patterns Team
+    email: ztvp-arch-group@redhat.com
+

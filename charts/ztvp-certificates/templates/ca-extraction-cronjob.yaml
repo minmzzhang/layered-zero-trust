@@ -1,0 +1,68 @@
+{{- if and .Values.enabled .Values.cronJob.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "ztvp-certificates.fullname" . }}-ca-extractor
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+  labels:
+    {{- include "ztvp-certificates.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronJob.schedule | quote }}
+  successfulJobsHistoryLimit: {{ .Values.cronJob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronJob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ .Values.cronJob.concurrencyPolicy }}
+  {{- if .Values.cronJob.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ .Values.cronJob.startingDeadlineSeconds }}
+  {{- end }}
+  suspend: {{ .Values.cronJob.suspend }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "ztvp-certificates.labels" . | nindent 8 }}
+    spec:
+      {{- if not .Values.debug.keepFailedJobs }}
+      ttlSecondsAfterFinished: {{ .Values.job.ttlSecondsAfterFinished }}
+      {{- end }}
+      backoffLimit: {{ .Values.job.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "ztvp-certificates.selectorLabels" . | nindent 12 }}
+        spec:
+          serviceAccountName: {{ include "ztvp-certificates.serviceAccountName" . }}
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            fsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: script
+              configMap:
+                name: {{ include "ztvp-certificates.fullname" . }}-script
+                defaultMode: 0755
+          containers:
+          - name: ca-extractor
+            image: {{ .Values.job.image.registry }}/{{ .Values.job.image.repository }}:{{ .Values.job.image.tag }}
+            imagePullPolicy: {{ .Values.job.image.pullPolicy }}
+            securityContext:
+              allowPrivilegeEscalation: false
+              runAsUser: 1001
+              capabilities:
+                drop:
+                  - ALL
+              runAsNonRoot: true
+            resources:
+              {{- toYaml .Values.job.resources | nindent 14 }}
+            volumeMounts:
+              - name: script
+                mountPath: /scripts
+                readOnly: true
+            command:
+              - /bin/bash
+              - /scripts/extract-certificates.sh
+{{- end }}

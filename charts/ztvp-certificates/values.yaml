@@ -1,0 +1,186 @@
+# Global certificate configuration for ZTVP pattern
+# Provides CA certificates for SSL/TLS verification across all components
+
+# Global settings
+global:
+  # Namespace where the source ConfigMap will be created
+  # Using openshift-config namespace (standard location for cluster-wide configuration)
+  namespace: openshift-config
+
+# Enable/disable certificate management
+enabled: true
+
+# Automatically detect and extract CA certificates from OpenShift
+# Recommended: true (works for most scenarios)
+autoDetect: true
+
+# Custom CA certificate configuration
+customCA:
+  # Primary custom CA: Reference an existing Kubernetes secret containing CA certificates
+  # To create the secret:
+  #   Single cert:    oc create secret generic custom-ca-bundle --from-file=ca.crt=/path/to/ca.crt -n openshift-config
+  #   Multiple certs: cat cert1.crt cert2.crt cert3.crt > combined.crt && oc create secret generic custom-ca-bundle --from-file=ca.crt=combined.crt -n openshift-config
+  secretRef:
+    enabled: false
+    name: ""           # Name of secret containing CA certificate(s)
+    namespace: ""      # Namespace where secret is located
+    key: "ca.crt"     # Key in secret containing the certificate(s)
+  # Example:
+  # secretRef:
+  #   enabled: true
+  #   name: custom-ca-bundle
+  #   namespace: openshift-config
+  #   key: ca.crt
+  
+  # Additional CA certificates: Reference multiple secrets
+  # Useful when you have multiple CA certificates in separate secrets
+  # Create secrets first:
+  #   oc create secret generic <name> --from-file=ca.crt=/path/to/cert.crt -n openshift-config
+  # Configure via overrides/values-ztvp-certificates.yaml (using extraValueFiles)
+  additionalCertificates: []
+  # Example:
+  # additionalCertificates:
+  #   - name: corporate-root-ca
+  #     secretRef:
+  #       name: corporate-root-ca
+  #       namespace: openshift-config
+  #       key: ca.crt
+
+# Custom source locations for auto-detection
+# Override default locations where CA certificates are found
+customSource:
+  # Where to find ingress CA certificate
+  ingressCA:
+    # Default: router-certs-default secret in openshift-ingress
+    secretName: ""          # Leave empty to use auto-detection
+    secretNamespace: ""
+    secretKey: "tls.crt"
+  
+  # Where to find OpenShift service CA certificate
+  serviceCA:
+    # Default: openshift-service-ca.crt ConfigMap in openshift-config
+    configMapName: ""       # Leave empty to use auto-detection
+    configMapNamespace: ""
+    configMapKey: "service-ca.crt"
+
+# CronJob configuration for automatic certificate extraction and rotation
+# A one-time Job runs during initial installation (ArgoCD PreSync hook)
+# The CronJob handles automatic rotation on a schedule
+cronJob:
+  # Set to false to disable the CronJob (for debugging)
+  enabled: true
+  
+  # Schedule for certificate extraction (cron format)
+  # Default: Every day at 2 AM
+  # Examples:
+  #   "0 2 * * *"     - Daily at 2 AM
+  #   "0 */6 * * *"   - Every 6 hours
+  #   "0 0 * * 0"     - Weekly on Sunday at midnight
+  #   "0 2 1 * *"     - Monthly on 1st at 2 AM
+  schedule: "0 2 * * *"
+  
+  # CronJob specific settings
+  successfulJobsHistoryLimit: 3  # Keep last 3 successful jobs
+  failedJobsHistoryLimit: 1      # Keep last 1 failed job
+  concurrencyPolicy: Forbid       # Don't allow concurrent runs
+  startingDeadlineSeconds: 300    # Start within 5 minutes of scheduled time
+  suspend: false                  # Set to true to temporarily disable
+
+# Job configuration (used by both Job and CronJob)
+job:
+  # Container image for CA extraction
+  image:
+    registry: registry.redhat.io
+    repository: openshift4/ose-cli
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Resource limits
+  # Note: Processing 150+ certificates requires sufficient memory
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  
+  # Job retry policy
+  backoffLimit: 3
+  
+  # TTL for completed jobs (cleanup)
+  ttlSecondsAfterFinished: 300  # 5 minutes
+
+# ConfigMap name that will be created in global.namespace
+configMapName: ztvp-trusted-ca
+
+# Automatic rollout configuration
+# After certificate extraction, automatically restart consuming applications
+rollout:
+  enabled: true
+  
+  # Strategy: how to identify resources to restart
+  # - "all": Restart all Deployments/StatefulSets in target namespaces
+  # - "labeled": Restart only resources with specific labels
+  # - "specific": Restart specific named resources (see targets below)
+  strategy: labeled
+  
+  # Label selector for "labeled" strategy
+  # Only restart resources with these labels
+  labelSelector:
+    ztvp.io/uses-certificates: "true"
+  
+  # Specific targets for "specific" strategy
+  # List of deployments/statefulsets to restart after certificate update
+  targets:
+    - namespace: qtodo
+      kind: Deployment  # Deployment, StatefulSet, DaemonSet
+      name: qtodo
+  
+  # Resource kinds to restart (applies to "all" and "labeled" strategies)
+  resourceKinds:
+    - Deployment
+    - StatefulSet
+
+# Annotations to add to the ConfigMap
+configMapAnnotations:
+  argocd.argoproj.io/sync-options: Prune=false
+
+# Labels to add to the ConfigMap
+configMapLabels:
+  app.kubernetes.io/name: ztvp-certificates
+  app.kubernetes.io/component: tls-certificates
+  app.kubernetes.io/managed-by: ztvp-certificate-manager
+
+# Enable validation of extracted certificates
+validation:
+  enabled: true
+  # Minimum certificate size (bytes) to consider valid
+  minSize: 100
+  # Verify certificate can be parsed by openssl
+  parseCheck: true
+
+# Distribution configuration
+# Automatically distribute certificates to multiple namespaces
+distribution:
+  # Enable distribution to target namespaces
+  enabled: true
+  
+  # Target namespaces where certificates should be distributed
+  # Each namespace will get a ConfigMap named: ztvp-trusted-ca-<namespace>
+  targetNamespaces:
+    - qtodo
+    # - rhtpa  # Keep RHTPA as-is for now; add when ready
+    # Add more namespaces as needed
+  
+  # Distribution method: ACM Policy distributes ConfigMaps to target namespaces
+  # Requires: ManagedClusterSetBinding in the namespace
+  method: "acm-policy"
+
+# Debugging options
+debug:
+  # Enable verbose logging in extraction job
+  verbose: false
+  # Keep failed jobs for debugging (don't auto-cleanup)
+  keepFailedJobs: false
+

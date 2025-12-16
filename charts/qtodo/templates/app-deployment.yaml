@@ -5,6 +5,7 @@ metadata:
     argocd.argoproj.io/sync-wave: '20'
   labels:
     app: qtodo
+    ztvp.io/uses-certificates: "true"
   name: qtodo
   namespace: qtodo
 spec:
@@ -65,6 +66,8 @@ spec:
             value: /run/secrets/db-credentials/credentials.properties
           - name: JWT_TOKEN_FILE
             value: /svids/jwt.token
+          - name: ZTVP_CA_BUNDLE
+            value: /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
         volumeMounts:
           - name: svids
             mountPath: /svids
@@ -72,6 +75,9 @@ spec:
             mountPath: /run/secrets/db-credentials
           - name: spiffe-vault-client
             mountPath: /opt/app-root/src
+          - name: ztvp-trusted-ca
+            mountPath: /etc/pki/ca-trust/extracted/pem
+            readOnly: true
 {{- end }}
       containers:
 {{- if and .Values.app.spire.enabled .Values.app.spire.sidecars }}
@@ -113,6 +119,8 @@ spec:
           value: /run/secrets/db-credentials/credentials.properties
         - name: JWT_TOKEN_FILE
           value: /svids/jwt.token
+        - name: ZTVP_CA_BUNDLE
+          value: /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
         volumeMounts:
         - name: svids
           mountPath: /svids
@@ -121,6 +129,9 @@ spec:
           mountPath: /run/secrets/db-credentials
         - name: spiffe-vault-client
           mountPath: /opt/app-root/src
+          readOnly: true
+        - name: ztvp-trusted-ca
+          mountPath: /etc/pki/ca-trust/extracted/pem
           readOnly: true
 {{- end }}
       - name: qtodo
@@ -195,4 +206,8 @@ spec:
         - name: spiffe-vault-client
           configMap:
             name: spiffe-vault-client
+        - name: ztvp-trusted-ca
+          configMap:
+            name: ztvp-trusted-ca
+            defaultMode: 420
 {{- end }}

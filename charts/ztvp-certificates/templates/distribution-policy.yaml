@@ -1,0 +1,82 @@
+{{- if .Values.distribution.enabled }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: ztvp-certificates-distribution
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+    policy.open-cluster-management.io/standards: NIST-CSF
+    policy.open-cluster-management.io/categories: PR.DS Data Security
+    policy.open-cluster-management.io/controls: PR.DS-2 Data-in-transit
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: ztvp-ca-distribution
+        spec:
+          remediationAction: enforce
+          severity: high
+          namespaceSelector:
+            include:
+{{- range .Values.distribution.targetNamespaces }}
+              - {{ . }}
+{{- end }}
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: ztvp-trusted-ca
+                  labels:
+                    app.kubernetes.io/managed-by: ztvp-certificates
+                    ztvp.io/certificate-bundle: "true"
+                  annotations:
+                    ztvp.io/source: "openshift-config/ztvp-trusted-ca"
+                    ztvp.io/distribution-method: "acm-policy"
+                data:
+                  tls-ca-bundle.pem: |
+                    {{ `{{hub fromConfigMap "` }}{{ $.Values.global.namespace }}{{ `" "` }}{{ $.Values.configMapName }}{{ `" "tls-ca-bundle.pem" | autoindent hub}}` }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: ztvp-certificates-distribution-binding
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+bindingOverrides:
+  remediationAction: enforce
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: ztvp-certificates-distribution-placement
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: ztvp-certificates-distribution
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: ztvp-certificates-distribution-placement
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: local-cluster
+              operator: In
+              values:
+                - "true"
+{{- end }}
+

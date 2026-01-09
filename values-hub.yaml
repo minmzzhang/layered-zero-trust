@@ -163,15 +163,25 @@ clusterGroup:
       path: charts/ztvp-certificates
       annotations:
         argocd.argoproj.io/sync-wave: "-10"
+      # Ignore the ACM-replicated policy in local-cluster namespace
+      # ACM automatically creates policy replicas with name pattern: <source-ns>.<policy-name>
+      ignoreDifferences:
+        - group: policy.open-cluster-management.io
+          kind: Policy
+          name: openshift-config.ztvp-certificates-distribution
+          namespace: local-cluster
+          jsonPointers:
+            - /
       # Use extraValueFiles for complex nested structures like additionalCertificates
       # The validated patterns framework only processes 'overrides' as --set parameters
       extraValueFiles:
         - /overrides/values-ztvp-certificates.yaml
       overrides:
-        # Job TTL: Retention time for completed CA extraction jobs
-        # Default: 300s (5 min). Extended for debugging/verification.
-        - name: job.ttlSecondsAfterFinished
-          value: "900"  # 15 minutes
+        # Disable Job TTL to prevent ArgoCD OutOfSync when Kubernetes deletes completed Jobs
+        # The initial Job runs once during first sync and stays around
+        # The CronJob handles ongoing certificate extraction
+        - name: debug.keepFailedJobs
+          value: "true"  # This disables ttlSecondsAfterFinished
         
         # Debug settings: Enable for troubleshooting certificate extraction issues
         # verbose: Enables bash 'set -x' for detailed script execution logging
@@ -185,8 +195,9 @@ clusterGroup:
         # Uncomment to add a primary custom CA:
         # Single cert: oc create secret generic custom-ca-bundle --from-file=ca.crt=/path/to/ca.crt -n openshift-config
         # Multiple certs: cat corp-root.crt intermediate.crt partner.crt > combined-ca.crt && oc create secret generic custom-ca-bundle --from-file=ca.crt=combined-ca.crt -n openshift-config
-        - name: customCA.secretRef.enabled
-          value: "true"
+        # Disabled for now - using auto-detection only
+        # - name: customCA.secretRef.enabled
+        #   value: "true"
         - name: customCA.secretRef.name
           value: custom-ca-bundle
         - name: customCA.secretRef.namespace

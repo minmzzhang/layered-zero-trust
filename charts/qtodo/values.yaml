@@ -63,6 +63,11 @@ app:
     enabled: true
     name: "oidc-client-secret"
     vaultPath: "secret/data/global/oidc-client-secret"
+  
+  # Truststore configuration for Java CA certificates
+  truststore:
+    enabled: true
+    vaultPath: "secret/data/global/qtodo-truststore"
 
 # PostgreSQL database configuration
 postgresql:

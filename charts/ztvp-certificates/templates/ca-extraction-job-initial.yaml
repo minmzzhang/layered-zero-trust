@@ -7,6 +7,9 @@ metadata:
   namespace: {{ .Values.global.namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "-8"
+    # Run as regular sync resource (after RBAC at -9, before Policy at -5)
+    # Using Prune=false prevents OutOfSync after TTL deletes the completed Job
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     {{- include "ztvp-certificates.labels" . | nindent 4 }}
     app.kubernetes.io/component: initial-extraction

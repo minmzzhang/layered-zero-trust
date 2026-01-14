@@ -29,6 +29,59 @@ spec:
     spec:
 {{- if eq .Values.app.spire.enabled true }}
       initContainers:
+      - name: init-ca-truststore
+        image: registry.redhat.io/ubi9/openjdk-17:latest
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Converting CA bundle to Java truststore..."
+            
+            # Validate password is provided
+            if [ -z "$TRUSTSTORE_PASSWORD" ]; then
+              echo "ERROR: TRUSTSTORE_PASSWORD not set"
+              exit 1
+            fi
+            
+            # Split the PEM bundle into individual certificates
+            csplit -s -z -f /tmp/cert- /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem '/-----BEGIN CERTIFICATE-----/' '{*}'
+            
+            # Create the truststore with each certificate
+            TRUSTSTORE_PATH="/run/secrets/truststore/cacerts"
+            
+            # Remove any existing truststore
+            rm -f "$TRUSTSTORE_PATH"
+            
+            # Import each certificate into the truststore
+            cert_index=0
+            for cert_file in /tmp/cert-*; do
+              if [ -s "$cert_file" ]; then
+                echo "Importing certificate $cert_index from $cert_file"
+                keytool -import -noprompt \
+                  -alias "ztvp-ca-$cert_index" \
+                  -keystore "$TRUSTSTORE_PATH" \
+                  -storepass "$TRUSTSTORE_PASSWORD" \
+                  -file "$cert_file" || echo "Warning: Failed to import $cert_file"
+                cert_index=$((cert_index + 1))
+              fi
+            done
+            
+            echo "Successfully created truststore with $cert_index certificates"
+            ls -lh "$TRUSTSTORE_PATH"
+        env:
+          - name: TRUSTSTORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: qtodo-truststore-secret
+                key: truststore-password
+        volumeMounts:
+          - name: ztvp-trusted-ca
+            mountPath: /etc/pki/ca-trust/extracted/pem
+            readOnly: true
+          - name: truststore
+            mountPath: /run/secrets/truststore
       - name: init-spiffe-helper
         image: {{ template "qtodo.image" .Values.app.images.spiffeHelper }}
         imagePullPolicy: {{ .Values.app.images.spiffeHelper.pullPolicy }}
@@ -181,11 +234,29 @@ spec:
             secretKeyRef:
               name: oidc-client-secret
               key: client-secret
+{{- if eq .Values.app.truststore.enabled true }}
+        # Truststore password from Vault secret
+        - name: TRUSTSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: qtodo-truststore-secret
+              key: truststore-password
+        # JVM-level truststore configuration for all SSL connections
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Djavax.net.ssl.trustStore=/run/secrets/truststore/cacerts -Djavax.net.ssl.trustStoreType=JKS -Djavax.net.ssl.trustStorePassword=$(TRUSTSTORE_PASSWORD)"
+{{- end }}
 {{- end }}
 {{- if eq .Values.app.spire.enabled true }}
         volumeMounts:
           - name: db-credentials
             mountPath: /run/secrets/db-credentials
+          - name: truststore
+            mountPath: /run/secrets/truststore
+            readOnly: true
+          # Mount ZTVP CA bundle for non-Java tools (curl, openssl, etc.)
+          - name: ztvp-trusted-ca
+            mountPath: /etc/pki/ca-trust/extracted/pem
+            readOnly: true
 {{- end }}
         resources: {}
       serviceAccountName: qtodo
@@ -210,4 +281,6 @@ spec:
           configMap:
             name: ztvp-trusted-ca
             defaultMode: 420
+        - name: truststore
+          emptyDir: {}
 {{- end }}

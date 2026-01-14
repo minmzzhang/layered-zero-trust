@@ -4,8 +4,8 @@ metadata:
   name: qtodo-config-env
   namespace: {{ .Release.Namespace }}
 data:
-{{- if eq .Values.app.oidc.enabled true }}
-  QUARKUS_OIDC_ENABLED: "{{ .Values.app.oidc.enabled }}"
+{{- if eq .Values.app.spire.enabled true }}
+  QUARKUS_OIDC_ENABLED: "true"
   QUARKUS_OIDC_AUTH_SERVER_URL: "{{ default (printf "https://keycloak.%s/realms/ztvp" .Values.global.localClusterDomain) .Values.app.oidc.authServerUrl }}"
   QUARKUS_OIDC_CLIENT_ID: "{{ .Values.app.oidc.clientId }}"
   QUARKUS_OIDC_APPLICATION_TYPE: "{{ .Values.app.oidc.applicationType }}"

@@ -14,7 +14,8 @@ rhtpa:
   oidcRealm: "ztvp"
   clientId: "rhtpa-cli"
   clientSecretName: "qtodo-rhtpa-cli-password"
-  clientSecretVaultPath: "secret/data/global/rhtpa-oidc-cli-secret"
+  # RHTPA OIDC CLI secret path
+  clientSecretVaultPath: "secret/data/hub/rhtpa/rhtpa-oidc-cli"
   clientSecretVaultKey: "client-secret"
 
 # qtodo repository configuration
@@ -43,7 +44,8 @@ registry:
   tlsVerify: "true"
   user: "quay-user"
   passwordVaultKey: "quay-user-password"
-  vaultPath: "secret/data/global/quay-users"
+  # Infrastructure secrets - stored in infra path
+  vaultPath: "secret/data/hub/infra/quay-users"
 
 # spire configuration
 spire:

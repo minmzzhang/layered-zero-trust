@@ -349,7 +349,8 @@ keycloak:
   name: keycloak
   postgresqlDb:
     database: keycloak
-    passwordVaultKey: secret/data/global/keycloak
+    # Keycloak DB password path
+    passwordVaultKey: secret/data/hub/keycloak/keycloak-db
     secretName: postgresql-db
     username: keycloak
   realms: []
@@ -357,5 +358,14 @@ keycloak:
     secret: keycloak-tls
     serviceServing: true
   users:
-    passwordVaultKey: secret/data/global/keycloak-users
+    # User credentials path
+    passwordVaultKey: secret/data/hub/users/keycloak-users
     secretName: keycloak-users
+  # OIDC client secrets for realm configuration
+  oidcSecrets:
+    # QTodo OIDC client secret
+    qtodo:
+      vaultPath: secret/data/hub/qtodo/qtodo-oidc-client
+    # RHTPA CLI OIDC client secret
+    rhtpaCli:
+      vaultPath: secret/data/hub/rhtpa/rhtpa-oidc-cli

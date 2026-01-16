@@ -37,7 +37,7 @@ spec:
           - -c
           - |
             set -e
-            echo "Converting CA bundle to Java truststore..."
+            echo "Converting CA bundle to PKCS12 truststore using Java KeyStore API..."
             
             # Validate password is provided
             if [ -z "$TRUSTSTORE_PASSWORD" ]; then
@@ -45,30 +45,50 @@ spec:
               exit 1
             fi
             
-            # Split the PEM bundle into individual certificates
-            csplit -s -z -f /tmp/cert- /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem '/-----BEGIN CERTIFICATE-----/' '{*}'
+            CA_BUNDLE="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+            TRUSTSTORE_PATH="/run/secrets/truststore/truststore.p12"
             
-            # Create the truststore with each certificate
-            TRUSTSTORE_PATH="/run/secrets/truststore/cacerts"
+            # Verify CA bundle exists
+            if [ ! -f "$CA_BUNDLE" ]; then
+              echo "ERROR: CA bundle not found at $CA_BUNDLE"
+              exit 1
+            fi
             
-            # Remove any existing truststore
-            rm -f "$TRUSTSTORE_PATH"
+            # Count certificates in bundle
+            CERT_COUNT=$(grep -c "BEGIN CERTIFICATE" "$CA_BUNDLE" || echo "0")
+            echo "Found $CERT_COUNT certificates in CA bundle"
             
-            # Import each certificate into the truststore
-            cert_index=0
-            for cert_file in /tmp/cert-*; do
-              if [ -s "$cert_file" ]; then
-                echo "Importing certificate $cert_index from $cert_file"
-                keytool -import -noprompt \
-                  -alias "ztvp-ca-$cert_index" \
-                  -keystore "$TRUSTSTORE_PATH" \
-                  -storepass "$TRUSTSTORE_PASSWORD" \
-                  -file "$cert_file" || echo "Warning: Failed to import $cert_file"
-                cert_index=$((cert_index + 1))
-              fi
-            done
+            # Use jshell to bulk-import all certificates (single JVM, much faster than keytool loop)
+            jshell -R-Dpassword="$TRUSTSTORE_PASSWORD" -R-Dbundle="$CA_BUNDLE" -R-Doutput="$TRUSTSTORE_PATH" <<'JSHELL'
+            import java.security.*;
+            import java.security.cert.*;
+            import java.io.*;
+            import java.nio.file.*;
             
-            echo "Successfully created truststore with $cert_index certificates"
+            String password = System.getProperty("password");
+            String bundlePath = System.getProperty("bundle");
+            String outputPath = System.getProperty("output");
+            
+            KeyStore ks = KeyStore.getInstance("PKCS12");
+            ks.load(null, password.toCharArray());
+            
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            byte[] pemBytes = Files.readAllBytes(Path.of(bundlePath));
+            
+            var certs = cf.generateCertificates(new ByteArrayInputStream(pemBytes));
+            int i = 0;
+            for (var cert : certs) {
+                ks.setCertificateEntry("ztvp-ca-" + String.format("%03d", i++), cert);
+            }
+            
+            try (FileOutputStream fos = new FileOutputStream(outputPath)) {
+                ks.store(fos, password.toCharArray());
+            }
+            System.out.println("Imported " + i + " certificates into PKCS12 truststore");
+            /exit
+            JSHELL
+            
+            echo "Successfully created PKCS12 truststore"
             ls -lh "$TRUSTSTORE_PATH"
         env:
           - name: TRUSTSTORE_PASSWORD
@@ -82,6 +102,38 @@ spec:
             readOnly: true
           - name: truststore
             mountPath: /run/secrets/truststore
+      - name: wait-for-keycloak
+        image: registry.redhat.io/openshift4/ose-tools-rhel9:latest
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Waiting for Keycloak OIDC endpoint to be available..."
+            KEYCLOAK_URL="{{ default (printf "https://keycloak.%s/realms/ztvp/.well-known/openid-configuration" .Values.global.localClusterDomain) .Values.app.oidc.authServerUrl }}/.well-known/openid-configuration"
+            # Remove duplicate .well-known if authServerUrl already contains realm
+            KEYCLOAK_URL=$(echo "$KEYCLOAK_URL" | sed 's|/.well-known/openid-configuration/.well-known/openid-configuration|/.well-known/openid-configuration|')
+            
+            MAX_RETRIES=60
+            RETRY_INTERVAL=5
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if curl -sf --cacert /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem "$KEYCLOAK_URL" > /dev/null 2>&1; then
+                echo "Keycloak is available!"
+                exit 0
+              fi
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "Keycloak not ready yet (attempt $RETRY_COUNT/$MAX_RETRIES). Retrying in ${RETRY_INTERVAL}s..."
+              sleep $RETRY_INTERVAL
+            done
+            
+            echo "WARNING: Keycloak not available after $MAX_RETRIES attempts. Continuing anyway..."
+            exit 0
+        volumeMounts:
+          - name: ztvp-trusted-ca
+            mountPath: /etc/pki/ca-trust/extracted/pem
+            readOnly: true
       - name: init-spiffe-helper
         image: {{ template "qtodo.image" .Values.app.images.spiffeHelper }}
         imagePullPolicy: {{ .Values.app.images.spiffeHelper.pullPolicy }}
@@ -213,7 +265,7 @@ spec:
           value: '0.0.0.0'
         - name: QUARKUS_HTTP_PORT
           value: '8080'
-        - name: QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION
+        - name: QUARKUS_HIBERNATE_ORM_SCHEMA_MANAGEMENT_STRATEGY
           value: 'drop-and-create'
 {{- if eq .Values.app.spire.enabled false }}
         - name: QUARKUS_DATASOURCE_USERNAME
@@ -241,9 +293,9 @@ spec:
             secretKeyRef:
               name: qtodo-truststore-secret
               key: truststore-password
-        # JVM-level truststore configuration for all SSL connections
+        # JVM-level truststore configuration for all SSL connections (PKCS12 format)
         - name: JAVA_TOOL_OPTIONS
-          value: "-Djavax.net.ssl.trustStore=/run/secrets/truststore/cacerts -Djavax.net.ssl.trustStoreType=JKS -Djavax.net.ssl.trustStorePassword=$(TRUSTSTORE_PASSWORD)"
+          value: "-Djavax.net.ssl.trustStore=/run/secrets/truststore/truststore.p12 -Djavax.net.ssl.trustStoreType=PKCS12 -Djavax.net.ssl.trustStorePassword=$(TRUSTSTORE_PASSWORD)"
 {{- end }}
 {{- end }}
 {{- if eq .Values.app.spire.enabled true }}

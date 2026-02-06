@@ -20,6 +20,93 @@ In our demo, we will use a number of additional ZTVP components. These component
 * [Multicloud Object Gateway](https://docs.redhat.com/en/documentation/red_hat_openshift_container_storage/4.8/html/managing_hybrid_and_multicloud_resources/index) is a data service for OpenShift that provides an S3-compatible object storage. In our case, this component is necessary to provide a storage system to Quay.
 * [Red Hat OpenShift Pipelines](https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/1.20) is a cloud-native CI/CD solution built on the Tekton framework. We will use this product to automate our secure supply chain process, but you could use your own CI/CD solution if one exists.
 
+## Bring Your Own (BYO) Container Registry
+
+By default, ZTVP deploys a built-in Red Hat Quay registry. However, you can use your own container registry (e.g., quay.io, Docker Hub, GitHub Container Registry, or a private registry) instead.
+
+### Configuration Steps
+
+1. **Disable built-in Quay registry** (optional - if not using Quay): Comment out the Quay-related applications in `values-hub.yaml`: `quay-enterprise` namespace, `quay-operator` subscription, and `quay-registry` application.
+
+2. **Configure registry credentials in Vault**: Add your registry credentials to your local `~/values-secret.yaml` file (not the template in the repository):
+
+    ```bash
+    # Copy template to local file if not already done
+    cp values-secret.yaml.template ~/values-secret.yaml
+    ```
+
+    Then add the external registry secret section to `~/values-secret.yaml`:
+
+    ```yaml
+    - name: registry-user
+      vaultPrefixes:
+      - hub/infra/registry
+      fields:
+      - name: registry-password
+        value: "your-registry-token"
+        onMissingValue: error
+    ```
+
+    > **Note**: Never commit `~/values-secret.yaml` to git. This file contains sensitive credentials and should remain local.
+
+3. **Set registry configuration in values-hub.yaml**: For the supply-chain application, add these overrides:
+
+    ```yaml
+    overrides:
+      # Disable built-in Quay
+      - name: quay.enabled
+        value: "false"
+      # Enable external registry
+      - name: externalRegistry.enabled
+        value: "true"
+      # External registry settings
+      - name: registry.domain
+        value: "your-registry.example.com"
+      - name: registry.user
+        value: "your-username"
+      - name: registry.org
+        value: "your-org"
+    ```
+
+4. **Configure qtodo for custom registry** (if pulling from custom registry):
+
+    ```yaml
+    overrides:
+      - name: app.images.main.registry.auth
+        value: true
+      - name: app.images.main.registry.domain
+        value: "your-registry.example.com"
+      - name: app.images.main.registry.user
+        value: "your-username"
+    ```
+
+### Required Configuration
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `registry.domain` | Registry hostname (REQUIRED) | `quay.io`, `ghcr.io`, `registry.example.com` |
+| `registry.org` | Organization/namespace | `my-org` |
+| `registry.repo` | Repository name | `qtodo` |
+| `registry.user` | Registry username | `my-robot-account` |
+| `quay.enabled` | Set to `false` for BYO registry | `false` |
+
+### Vault Paths
+
+Registry credentials are stored at different paths based on registry type:
+
+| Registry Type | Vault Path | Password Key |
+|---------------|------------|--------------|
+| Built-in Quay | `secret/data/hub/infra/quay/quay-users` | `quay-user-password` |
+| BYO Registry | `secret/data/hub/infra/registry/registry-user` | `registry-password` |
+
+The chart automatically selects the correct vault path based on the enabled flags:
+
+* `quay.enabled=true`: Uses built-in Quay vault path
+* `externalRegistry.enabled=true`: Uses external registry vault path
+* Both disabled (default): No registry auth secret created (fresh install state)
+
+The Vault policy `hub-supply-chain-jwt-secret` grants read access to both paths for the pipeline service account.
+
 ## Automatic approach
 
 To automate the application building and certifying process, we will use _Red Hat OpenShift Pipelines_.
@@ -78,10 +165,38 @@ Using the previously created definition, start a new execution of the pipeline u
 oc create -f qtodo-pipeline.yaml
 ```
 
+#### Using Helm Template
+
+You can also trigger a pipeline run using the Helm template included in the chart. This method uses the `pipelinerun-qtodo.yaml` template with proper workspace bindings:
+
+```shell
+helm template supply-chain charts/supply-chain \
+  --set pipelinerun.enabled=true \
+  --set global.namespace=supply-chain \
+  --set registry.authSecretName=qtodo-registry-auth \
+  --set registry.domain=quay.io \
+  --show-only templates/pipelinerun-qtodo.yaml | oc create -f -
+```
+
+This renders the PipelineRun template with the correct PVC and secret workspace bindings, then creates it in the cluster.
+
 You can review the current pipeline logs using the [Tekton CLI](https://tekton.dev/docs/cli/).
 
 ```shell
 tkn pipeline logs -n layered-zero-trust-hub -L -f
+```
+
+Or use `oc` commands to monitor progress:
+
+```shell
+# List pipeline runs
+oc get pipelinerun -n <namespace>
+
+# Check task status for a specific run
+oc get taskruns -n <namespace> -l tekton.dev/pipelineRun=<pipelinerun-name>
+
+# View logs for a specific task
+oc logs -n <namespace> -l tekton.dev/pipelineRun=<pipelinerun-name>,tekton.dev/pipelineTask=<task-name>
 ```
 
 ### Pipeline tasks

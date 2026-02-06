@@ -1,0 +1,21 @@
+{{- if .Values.pipelinerun.enabled }}
+---
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: qtodo-supply-chain-
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  pipelineRef:
+    name: qtodo-supply-chain
+  workspaces:
+    - name: qtodo-source
+      persistentVolumeClaim:
+        claimName: qtodo-workspace-source
+    - name: registry-auth-config
+      secret:
+        secretName: {{ .Values.registry.authSecretName }}
+{{- end }}

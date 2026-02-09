@@ -19,7 +19,7 @@ app:
         # Set to true when using private registry (built-in Quay or external)
         auth: false
         secretName: qtodo-registry-auth
-        user: quay-user
+        user: registry-user
         # domain: registry.example.com  # REQUIRED when auth is enabled
 
         # Built-in Quay registry (optional)

@@ -1,0 +1,28 @@
+{{- if and (index .Values.registry "embeddedOCP") (index .Values.registry.embeddedOCP "ensureImageNamespaceRBAC") }}
+# When using the embedded OCP image registry, the pipeline pushes to a namespace
+# that matches registry.org (e.g. ztvp). This ensures that namespace exists and
+# the pipeline SA has system:image-builder so the push succeeds (transparent to the user).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.registry.org }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-image-builder
+  namespace: {{ .Values.registry.org }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:image-builder
+subjects:
+  - kind: ServiceAccount
+    name: pipeline
+    namespace: {{ .Values.global.namespace }}
+{{- end }}

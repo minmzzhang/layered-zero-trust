@@ -65,6 +65,11 @@ registry:
   user: "registry-user"
   # Secret name for registry auth (dockerconfigjson)
   authSecretName: "qtodo-registry-auth"
+  # Embedded OCP registry only: create image namespace (registry.org) and grant
+  # pipeline SA system:image-builder so the pipeline can push. Set to true only when
+  # using the in-cluster OpenShift image registry; leave false for quay.io or other external registries.
+  embeddedOCP:
+    ensureImageNamespaceRBAC: false
 
 # pipeline run configuration
 pipelinerun:

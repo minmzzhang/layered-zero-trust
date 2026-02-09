@@ -28,14 +28,14 @@ By default, ZTVP deploys a built-in Red Hat Quay registry. However, you can use 
 
 1. **Disable built-in Quay registry** (optional - if not using Quay): Comment out the Quay-related applications in `values-hub.yaml`: `quay-enterprise` namespace, `quay-operator` subscription, and `quay-registry` application.
 
-2. **Configure registry credentials in Vault**: Add your registry credentials to your local `~/values-secret.yaml` file (not the template in the repository):
+2. **Configure registry credentials in Vault**: Per VP rule, add your registry credentials to `~/values-secrets.yaml` (or `~/values-secret.yaml` / `~/values-secret-layered-zero-trust.yaml` per VP lookup order):
 
     ```bash
     # Copy template to local file if not already done
-    cp values-secret.yaml.template ~/values-secret.yaml
+    cp values-secret.yaml.template ~/values-secrets.yaml
     ```
 
-    Then add the external registry secret section to `~/values-secret.yaml`:
+    Add the registry-user secret (same format for **BYO external registry** and **embedded OCP registry**):
 
     ```yaml
     - name: registry-user
@@ -43,11 +43,15 @@ By default, ZTVP deploys a built-in Red Hat Quay registry. However, you can use 
       - hub/infra/registry
       fields:
       - name: registry-password
-        value: "your-registry-token"
+        value: "REPLACE_WITH_REGISTRY_TOKEN"
         onMissingValue: error
     ```
 
-    > **Note**: Never commit `~/values-secret.yaml` to git. This file contains sensitive credentials and should remain local.
+    Replace `REPLACE_WITH_REGISTRY_TOKEN` with:
+    * **Embedded OCP registry:** output of `oc whoami -t` (after `oc login`).
+    * **External registry (BYO):** your registry token or password (e.g. quay.io, ghcr.io).
+
+    > **Note**: Never commit `~/values-secrets.yaml` (or your local values-secret file) to git. This file contains sensitive credentials and should remain local.
 
 3. **Set registry configuration in values-hub.yaml**: For the supply-chain application, add these overrides:
 
@@ -83,21 +87,23 @@ By default, ZTVP deploys a built-in Red Hat Quay registry. However, you can use 
 ### Required Configuration
 
 | Parameter | Description | Example |
-|-----------|-------------|---------|
-| `registry.domain` | Registry hostname (REQUIRED) | `quay.io`, `ghcr.io`, `registry.example.com` |
+| --------- | ----------- | ------- |
+| `registry.domain` | Registry hostname (required for BYO only) | `quay.io`, `ghcr.io`, `registry.example.com` |
 | `registry.org` | Organization/namespace | `my-org` |
 | `registry.repo` | Repository name | `qtodo` |
 | `registry.user` | Registry username | `my-robot-account` |
 | `quay.enabled` | Set to `false` for BYO registry | `false` |
 
+> **Note**: For built-in Quay registry, `registry.domain` is automatically constructed as `quay-registry-quay-quay-enterprise.<hubClusterDomain>` and does not need to be specified. For BYO/external registries, `registry.domain` is **required**.
+
 ### Vault Paths
 
 Registry credentials are stored at different paths based on registry type:
 
-| Registry Type | Vault Path | Password Key |
-|---------------|------------|--------------|
-| Built-in Quay | `secret/data/hub/infra/quay/quay-users` | `quay-user-password` |
-| BYO Registry | `secret/data/hub/infra/registry/registry-user` | `registry-password` |
+| Registry Type   | Vault Path                                     | Password Key         |
+| --------------- | ---------------------------------------------- | -------------------- |
+| Built-in Quay   | `secret/data/hub/infra/quay/quay-users`        | `quay-user-password` |
+| BYO Registry    | `secret/data/hub/infra/registry/registry-user` | `registry-password`  |
 
 The chart automatically selects the correct vault path based on the enabled flags:
 
@@ -167,13 +173,28 @@ oc create -f qtodo-pipeline.yaml
 
 #### Using Helm Template
 
-You can also trigger a pipeline run using the Helm template included in the chart:
+You can also trigger a pipeline run using the Helm template included in the chart.
+
+**For Built-in Quay Registry:**
 
 ```shell
 helm template supply-chain charts/supply-chain \
   --set pipelinerun.enabled=true \
+  --set quay.enabled=true \
   --set global.namespace=layered-zero-trust-hub \
-  --set registry.authSecretName=qtodo-registry-auth \
+  --set global.hubClusterDomain=apps.example.com \
+  --show-only templates/pipelinerun-qtodo.yaml | oc create -f -
+```
+
+> **Note**: For built-in Quay, `registry.domain` is auto-constructed from `global.hubClusterDomain`.
+
+**For BYO/External Registry:**
+
+```shell
+helm template supply-chain charts/supply-chain \
+  --set pipelinerun.enabled=true \
+  --set externalRegistry.enabled=true \
+  --set global.namespace=layered-zero-trust-hub \
   --set registry.domain=quay.io \
   --show-only templates/pipelinerun-qtodo.yaml | oc create -f -
 ```

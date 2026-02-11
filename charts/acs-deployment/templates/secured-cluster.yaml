@@ -1,0 +1,21 @@
+{{- if .Values.acs.securedCluster.enabled }}
+---
+# SecuredCluster deploys per-cluster components (Sensor, Admission Controller, Collector).
+# When on the same cluster as Central, install in the same namespace as Central. Apply init bundle (or CRS) first.
+apiVersion: {{ .Values.acs.crdApiVersion }}
+kind: SecuredCluster
+metadata:
+  name: {{ .Values.acs.securedCluster.name }}
+  namespace: {{ .Values.acs.namespace }}
+  labels:
+    {{- include "acs-deployment.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  {{- if .Values.acs.securedCluster.clusterName }}
+  clusterName: {{ .Values.acs.securedCluster.clusterName | quote }}
+  {{- end }}
+  {{- with .Values.acs.securedCluster.spec }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+{{- end }}

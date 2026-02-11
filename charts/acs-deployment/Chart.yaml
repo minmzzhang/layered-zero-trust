@@ -1,0 +1,19 @@
+apiVersion: v2
+name: acs-deployment
+description: Red Hat Advanced Cluster Security (RHACS) deployment via Operator (Central and SecuredCluster)
+type: application
+version: 0.1.0
+appVersion: "4.0"
+keywords:
+  - rhacs
+  - acs
+  - advanced-cluster-security
+  - security
+  - zero-trust
+icon: https://validatedpatterns.io/images/validated-patterns.png
+home: https://github.com/validatedpatterns/layered-zero-trust
+sources:
+  - https://github.com/validatedpatterns/layered-zero-trust
+maintainers:
+  - name: Zero Trust Validated Patterns Team
+    email: ztvp-arch-group@redhat.com

@@ -1,0 +1,16 @@
+{{- if .Values.acs.central.enabled }}
+---
+# Central deploys the RHACS management plane (API, UI, Scanner).
+# Install the Operator in rhacs-operator; create this CR in a dedicated namespace (e.g. stackrox).
+apiVersion: {{ .Values.acs.crdApiVersion }}
+kind: Central
+metadata:
+  name: {{ .Values.acs.central.name }}
+  namespace: {{ .Values.acs.namespace }}
+  labels:
+    {{- include "acs-deployment.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  {{- toYaml .Values.acs.central.spec | nindent 2 }}
+{{- end }}

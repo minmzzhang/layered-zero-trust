@@ -1,0 +1,44 @@
+# Red Hat Advanced Cluster Security (RHACS) deployment
+# Deploys Central (and optionally SecuredCluster for the hub) via the RHACS Operator.
+# See: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.9/html/installing/installing-rhacs-on-red-hat-openshift
+#
+# Prerequisites:
+# - RHACS Operator installed in rhacs-operator (add namespace + subscription in values-hub.yaml).
+# - Central MUST be in a dedicated namespace (not the operator namespace). Red Hat recommends "stackrox".
+# - For SecuredCluster: create init bundle from Central UI or roxctl, apply it to this namespace, then enable securedCluster.
+
+global:
+  localClusterDomain: local.example.com
+
+acs:
+  # Namespace for Central and SecuredCluster CRs. Use a dedicated namespace; do not use rhacs-operator
+  # or names starting with kube, openshift, redhat, or istio-system. Red Hat recommends "stackrox".
+  namespace: stackrox
+
+  # CRD apiVersion. Use platform.stackrox.io/v1 for RHACS 4.x if v1alpha1 is not available.
+  crdApiVersion: platform.stackrox.io/v1alpha1
+
+  # Central: RHACS management plane (API, UI, Scanner). Deploy once per environment.
+  central:
+    enabled: true
+    name: central
+    # Optional spec overrides. See RHACS 4.9 "Central configuration options using the Operator".
+    # Example: expose Central via OpenShift route (recommended on OCP):
+    # spec:
+    #   central:
+    #     exposure:
+    #       route:
+    #         enabled: true
+    spec: {}
+
+  # SecuredCluster: per-cluster components (Sensor, Admission Controller, Collector).
+  # When on the same cluster as Central, must be in the same namespace as Central (stackrox).
+  # Requires an init bundle (or CRS) applied in acs.namespace before enabling.
+  securedCluster:
+    enabled: false
+    name: secured-cluster-hub
+    # Required: unique name for this cluster in the RHACS portal (cannot be changed after create).
+    clusterName: ""
+    # For same-cluster: omit centralEndpoint (operator uses Central in same namespace).
+    # For remote clusters: set centralEndpoint in spec, e.g. central.example.com:443
+    spec: {}

@@ -1,0 +1,12 @@
+extends: default
+ignore:
+  - templates/
+  - templates/**
+  - "**/templates/**"
+rules:
+  document-start: disable
+  line-length:
+    max: 160
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1

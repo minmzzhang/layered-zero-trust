@@ -64,6 +64,16 @@ clusterGroup:
         targetNamespace: openshift-compliance
         annotations:
           openshift.io/cluster-monitoring: "true"
+    # Red Hat Advanced Cluster Security (RHACS) - Uncomment to enable ACS
+    # Operator runs in rhacs-operator; Central and SecuredCluster CRs go in stackrox (dedicated namespace per RHACS 4.9 doc)
+    # - rhacs-operator:
+    #     operatorGroup: true
+    #     targetNamespace: rhacs-operator
+    #     annotations:
+    #       argocd.argoproj.io/sync-wave: "-5"
+    # - stackrox:
+    #     annotations:
+    #       argocd.argoproj.io/sync-wave: "0"  # Created before acs-deployment chart creates Central CR
     # Secure Supply Chain: Uncomment to enable OpenShift Pipelines
     # - openshift-pipelines
   subscriptions:
@@ -99,6 +109,14 @@ clusterGroup:
       config:
         nodeSelector:
           node-role.kubernetes.io/worker: ""
+    # RHACS operator (uncomment to enable ACS deployment chart)
+    # rhacs-operator:
+    #   name: rhacs-operator
+    #   namespace: rhacs-operator
+    #   channel: stable
+    #   catalogSource: redhat-operators
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "-4"
     # Storage and Registry operator subscriptions
     # Required for RHTPA and QUAY (provides NooBaa object storage backend)
     # ODF provides object storage backend (NooBaa) for RHTPA and optionally Quay
@@ -249,6 +267,15 @@ clusterGroup:
         # ArgoCD 'Progressing' status on storage with WaitForFirstConsumer mode.
         - name: compliance.storage.enabled
           value: false
+    # Red Hat Advanced Cluster Security (RHACS) - Uncomment with rhacs-operator + stackrox namespaces and rhacs-operator subscription
+    # acs-deployment:
+    #   name: acs-deployment
+    #   namespace: stackrox  # Central and SecuredCluster CRs in dedicated namespace (per RHACS 4.9 doc)
+    #   project: hub
+    #   path: charts/acs-deployment
+    #   annotations:
+    #     argocd.argoproj.io/sync-wave: "5"  # After operator and stackrox namespace exist
+    #   overrides: []
     vault:
       name: vault
       namespace: vault

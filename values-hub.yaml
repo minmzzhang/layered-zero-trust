@@ -28,33 +28,33 @@ clusterGroup:
         targetNamespace: cert-manager-operator
     # Layer 1: Storage and Registry
     # Required for RHTPA and QUAY (provides NooBaa object storage backend)
-    # - openshift-storage:
-    #     operatorGroup: true
-    #     targetNamespace: openshift-storage
-    #     annotations:
-    #       openshift.io/cluster-monitoring: "true"
-    #       argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
-    # - quay-enterprise:
-    #     annotations:
-    #       argocd.argoproj.io/sync-wave: "1"  # Create before NooBaa and all Quay components
-    #     labels:
-    #       openshift.io/cluster-monitoring: "true"
+    - openshift-storage:
+        operatorGroup: true
+        targetNamespace: openshift-storage
+        annotations:
+          openshift.io/cluster-monitoring: "true"
+          argocd.argoproj.io/sync-wave: "-5"  # Propagated to OperatorGroup by framework
+    - quay-enterprise:
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"  # Create before NooBaa and all Quay components
+        labels:
+          openshift.io/cluster-monitoring: "true"
     # RHTAS namespace (required when RHTAS application is enabled)
-    # - trusted-artifact-signer:
-    #     annotations:
-    #       argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
-    #     labels:
-    #       openshift.io/cluster-monitoring: "true"
-    # - rhtpa-operator:
-    #     operatorGroup: true
-    #     targetNamespace: rhtpa-operator
-    #     annotations:
-    #       argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
-    # - trusted-profile-analyzer:
-    #     annotations:
-    #       argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
-    #     labels:
-    #       openshift.io/cluster-monitoring: "true"
+    - trusted-artifact-signer:
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"  # Auto-created by RHTAS operator
+        labels:
+          openshift.io/cluster-monitoring: "true"
+    - rhtpa-operator:
+        operatorGroup: true
+        targetNamespace: rhtpa-operator
+        annotations:
+          argocd.argoproj.io/sync-wave: "-5"  # Create before operator subscription
+    - trusted-profile-analyzer:
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"  # Create before RHTPA components
+        labels:
+          openshift.io/cluster-monitoring: "true"
     - zero-trust-workload-identity-manager:
         operatorGroup: true
         targetNamespace: zero-trust-workload-identity-manager
@@ -64,7 +64,7 @@ clusterGroup:
         annotations:
           openshift.io/cluster-monitoring: "true"
     # Secure Supply Chain: OpenShift Pipelines
-    # - openshift-pipelines
+    - openshift-pipelines
   subscriptions:
     acm:
       name: advanced-cluster-management
@@ -77,9 +77,9 @@ clusterGroup:
       channel: stable-v1
       catalogSource: redhat-marketplace
     # Secure Supply Chain: OpenShift Pipelines
-    # openshift-pipelines:
-    #   name: openshift-pipelines-operator-rh
-    #   namespace: openshift-operators
+    openshift-pipelines:
+      name: openshift-pipelines-operator-rh
+      namespace: openshift-operators
     rhbk:
       name: rhbk-operator
       namespace: keycloak-system
@@ -101,36 +101,36 @@ clusterGroup:
     # Storage and Registry operator subscriptions
     # Required for RHTPA and QUAY (provides NooBaa object storage backend)
     # ODF provides object storage backend (NooBaa) for RHTPA and optionally Quay
-    # odf:
-    #   name: odf-operator
-    #   namespace: openshift-storage
-    #   channel: stable-4.20
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5)
-    # quay-operator:
-    #   name: quay-operator
-    #   namespace: openshift-operators
-    #   channel: stable-3.15
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-3"  # Install after ODF operator
+    odf:
+      name: odf-operator
+      namespace: openshift-storage
+      channel: stable-4.20
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5)
+    quay-operator:
+      name: quay-operator
+      namespace: openshift-operators
+      channel: stable-3.15
+      annotations:
+        argocd.argoproj.io/sync-wave: "-3"  # Install after ODF operator
     # RHTAS operator subscription (required when RHTAS application is enabled)
-    # rhtas-operator:
-    #   name: rhtas-operator
-    #   namespace: openshift-operators
-    #   channel: stable
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-2"  # Install after Quay operator, before applications
-    #   catalogSource: redhat-operators
+    rhtas-operator:
+      name: rhtas-operator
+      namespace: openshift-operators
+      channel: stable
+      annotations:
+        argocd.argoproj.io/sync-wave: "-2"  # Install after Quay operator, before applications
+      catalogSource: redhat-operators
     # RHTPA operator subscription
     # Channel: stable-v1.1 provides latest 1.1.x patch updates
     # Note: No direct upgrade path from 1.1.x to 2.x (requires fresh install)
-    # rhtpa-operator:
-    #   name: rhtpa-operator
-    #   namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
-    #   channel: stable-v1.1  # Use stable-v1.1 channel for 1.1.x updates
-    #   catalogSource: redhat-operators
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5), before applications
+    rhtpa-operator:
+      name: rhtpa-operator
+      namespace: rhtpa-operator  # MUST use dedicated namespace (not openshift-operators)
+      channel: stable-v1.1  # Use stable-v1.1 channel for 1.1.x updates
+      catalogSource: redhat-operators
+      annotations:
+        argocd.argoproj.io/sync-wave: "-4"  # Install after OperatorGroup (-5), before applications
   projects:
     - hub
   # Explicitly mention the cluster-state based overrides we plan to use for this pattern.
@@ -211,10 +211,10 @@ clusterGroup:
         # Required when pulling images from registries behind the cluster ingress
         # (e.g. built-in Quay, embedded OCP registry). Patches image.config.openshift.io/cluster.
         # Uncomment and set the registry hostname when enabling a registry option.
-        # - name: imagePullTrust.enabled
-        #   value: "true"
-        # - name: imagePullTrust.registries[0]
-        #   value: <registry-hostname>
+        - name: imagePullTrust.enabled
+          value: "true"
+        - name: imagePullTrust.registries[0]
+          value: quay-registry-quay-quay-enterprise.apps.{{ $.Values.global.clusterDomain }}
         
         # Note: additionalCertificates (complex nested array) temporarily disabled
         # Need to find proper way to pass complex structures in Validated Patterns
@@ -311,108 +311,108 @@ clusterGroup:
             policies:
               - apps-qtodo-jwt-secret
           # RHTPA vault role
-          # - name: rhtpa
-          #   audience: rhtpa
-          #   subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/rhtpa
-          #   policies:
-          #     - hub-infra-rhtpa-jwt-secret
+          - name: rhtpa
+            audience: rhtpa
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/trusted-profile-analyzer/sa/rhtpa
+            policies:
+              - hub-infra-rhtpa-jwt-secret
           # Supply chain vault role (for Tekton pipelines)
-          # - name: supply-chain
-          #   audience: supply-chain
-          #   subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/pipeline/sa/pipeline
-          #   policies:
-          #     - hub-supply-chain-jwt-secret
+          - name: supply-chain
+            audience: supply-chain
+            subject: spiffe://apps.{{ $.Values.global.clusterDomain }}/ns/pipeline/sa/pipeline
+            policies:
+              - hub-supply-chain-jwt-secret
     # Shared Object Storage Backend
     # Required for RHTPA and QUAY (provides S3-compatible storage via NooBaa MCG)
     # NooBaa MCG provides S3-compatible object storage for multiple applications
-    # noobaa-mcg:
-    #   name: noobaa-mcg
-    #   namespace: openshift-storage
-    #   project: hub
-    #   path: charts/noobaa-mcg
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "5"  # Deploy after core services
+    noobaa-mcg:
+      name: noobaa-mcg
+      namespace: openshift-storage
+      project: hub
+      path: charts/noobaa-mcg
+      annotations:
+        argocd.argoproj.io/sync-wave: "5"  # Deploy after core services
     # Quay Container Registry (uses NooBaa for storage)
-    # quay-registry:
-    #   name: quay-registry
-    #   namespace: quay-enterprise
-    #   project: hub
-    #   path: charts/quay-registry
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa storage backend
+    quay-registry:
+      name: quay-registry
+      namespace: quay-enterprise
+      project: hub
+      path: charts/quay-registry
+      annotations:
+        argocd.argoproj.io/sync-wave: "10"  # Deploy after NooBaa storage backend
     # RHTAS with SPIFFE Integration
     # Depends on: Vault, SPIRE, Keycloak (for Email OIDC issuer if used)
-    # trusted-artifact-signer:
-    #   name: trusted-artifact-signer
-    #   namespace: trusted-artifact-signer
-    #   project: hub
-    #   path: charts/rhtas-operator
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "15"  # Deploy after dependencies
-    #   overrides:
-    #     # OIDC Issuer Configuration - Both can be enabled simultaneously
-    #     # Enable SPIFFE issuer for workload identity
-    #     - name: rhtas.zeroTrust.spire.enabled
-    #       value: "true"
-    #     - name: rhtas.zeroTrust.spire.trustDomain
-    #       value: "apps.{{ $.Values.global.clusterDomain }}"
-    #     - name: rhtas.zeroTrust.spire.issuer
-    #       value: "https://spire-spiffe-oidc-discovery-provider.apps.{{ $.Values.global.clusterDomain }}"
-    #     # Enable Keycloak issuer for user/email authentication
-    #     - name: rhtas.zeroTrust.email.enabled
-    #       value: "true"
-    #     - name: rhtas.zeroTrust.email.issuer
-    #       value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}/realms/ztvp
+    trusted-artifact-signer:
+      name: trusted-artifact-signer
+      namespace: trusted-artifact-signer
+      project: hub
+      path: charts/rhtas-operator
+      annotations:
+        argocd.argoproj.io/sync-wave: "15"  # Deploy after dependencies
+      overrides:
+        # OIDC Issuer Configuration - Both can be enabled simultaneously
+        # Enable SPIFFE issuer for workload identity
+        - name: rhtas.zeroTrust.spire.enabled
+          value: "true"
+        - name: rhtas.zeroTrust.spire.trustDomain
+          value: "apps.{{ $.Values.global.clusterDomain }}"
+        - name: rhtas.zeroTrust.spire.issuer
+          value: "https://spire-spiffe-oidc-discovery-provider.apps.{{ $.Values.global.clusterDomain }}"
+        # Enable Keycloak issuer for user/email authentication
+        - name: rhtas.zeroTrust.email.enabled
+          value: "true"
+        - name: rhtas.zeroTrust.email.issuer
+          value: https://keycloak.apps.{{ $.Values.global.clusterDomain }}/realms/ztvp
     # RHTPA (Red Hat Trusted Profile Analyzer) with SPIFFE Integration
     # Depends on: NooBaa MCG (storage), Vault (secrets), SPIRE (identity), Keycloak (auth)
-    # trusted-profile-analyzer:
-    #   name: trusted-profile-analyzer
-    #   namespace: trusted-profile-analyzer
-    #   project: hub
-    #   path: charts/rhtpa-operator
-    #   annotations:
-    #     argocd.argoproj.io/sync-wave: "10"  # Create chart resources (OBC, DB, etc.)
-    #     # Note: The TrustedProfileAnalyzer CR is created by ACM Policy at wave 50
-    #     # to ensure the operator is fully ready (mitigates v1.1.0 initialization bug)
-    #   # Ignore differences to prevent OutOfSync status
-    #   ignoreDifferences:
-    #     # Ignore Job status changes (completion, failure counts, conditions)
-    #     # Jobs are created by hooks and their status changes don't require re-sync
-    #     - group: batch
-    #       kind: Job
-    #       jsonPointers:
-    #         - /status
-    #   overrides:
-    #     # Vault Integration
-    #     # - name: rhtpa.zeroTrust.vault.url
-    #     #   value: https://vault.vault.svc.cluster.local:8200
-    #     # Keycloak URL is automatically constructed from global.localClusterDomain
-    #     # TLS Configuration - Custom Ingress CA (for Azure/AWS/GCP with custom certs)
-    #     # For standard OpenShift deployments, auto-detection works without overrides
-    #     # For cloud platforms with custom ingress certs in non-standard locations:
-    #     # - name: rhtpa.tls.ingressCA.customSource.enabled
-    #     #   value: "true"
-    #     # - name: rhtpa.tls.ingressCA.customSource.secretName
-    #     #   value: "custom-ingress-cert"
-    #     # - name: rhtpa.tls.ingressCA.customSource.secretNamespace
-    #     #   value: "openshift-ingress"
-    #     # - name: rhtpa.tls.ingressCA.customSource.secretKey
-    #     #   value: "tls.crt"
-    #     # Importer Configuration
-    #     # Enable all 5 importers explicitly (chart defaults: cve and osv-github enabled)
-    #     # Period defaults to 1d for all importers (configured in chart)
-    #     # Default importers
-    #     # - name: rhtpa.modules.createImporters.importers.cve.cve.disabled
-    #     #   value: "false"
-    #     # - name: rhtpa.modules.createImporters.importers.osv-github.osv.disabled
-    #     #   value: "false"
-    #     # Additional importers (disabled by default due to large datasets)
-    #     # - name: rhtpa.modules.createImporters.importers.redhat-csaf.csaf.disabled
-    #     #   value: "false"
-    #     # - name: rhtpa.modules.createImporters.importers.quay-redhat-user-workloads.quay.disabled
-    #     #   value: "false"
-    #     # - name: rhtpa.modules.createImporters.importers.redhat-sboms.sbom.disabled
-    #     #   value: "false"
+    trusted-profile-analyzer:
+      name: trusted-profile-analyzer
+      namespace: trusted-profile-analyzer
+      project: hub
+      path: charts/rhtpa-operator
+      annotations:
+        argocd.argoproj.io/sync-wave: "10"  # Create chart resources (OBC, DB, etc.)
+        # Note: The TrustedProfileAnalyzer CR is created by ACM Policy at wave 50
+        # to ensure the operator is fully ready (mitigates v1.1.0 initialization bug)
+      # Ignore differences to prevent OutOfSync status
+      ignoreDifferences:
+        # Ignore Job status changes (completion, failure counts, conditions)
+        # Jobs are created by hooks and their status changes don't require re-sync
+        - group: batch
+          kind: Job
+          jsonPointers:
+            - /status
+      overrides:
+        # Vault Integration
+        # - name: rhtpa.zeroTrust.vault.url
+        #   value: https://vault.vault.svc.cluster.local:8200
+        # Keycloak URL is automatically constructed from global.localClusterDomain
+        # TLS Configuration - Custom Ingress CA (for Azure/AWS/GCP with custom certs)
+        # For standard OpenShift deployments, auto-detection works without overrides
+        # For cloud platforms with custom ingress certs in non-standard locations:
+        # - name: rhtpa.tls.ingressCA.customSource.enabled
+        #   value: "true"
+        # - name: rhtpa.tls.ingressCA.customSource.secretName
+        #   value: "custom-ingress-cert"
+        # - name: rhtpa.tls.ingressCA.customSource.secretNamespace
+        #   value: "openshift-ingress"
+        # - name: rhtpa.tls.ingressCA.customSource.secretKey
+        #   value: "tls.crt"
+        # Importer Configuration
+        # Enable all 5 importers explicitly (chart defaults: cve and osv-github enabled)
+        # Period defaults to 1d for all importers (configured in chart)
+        # Default importers
+        # - name: rhtpa.modules.createImporters.importers.cve.cve.disabled
+        #   value: "false"
+        # - name: rhtpa.modules.createImporters.importers.osv-github.osv.disabled
+        #   value: "false"
+        # Additional importers (disabled by default due to large datasets)
+        # - name: rhtpa.modules.createImporters.importers.redhat-csaf.csaf.disabled
+        #   value: "false"
+        # - name: rhtpa.modules.createImporters.importers.quay-redhat-user-workloads.quay.disabled
+        #   value: "false"
+        # - name: rhtpa.modules.createImporters.importers.redhat-sboms.sbom.disabled
+        #   value: "false"
     golang-external-secrets:
       name: golang-external-secrets
       namespace: golang-external-secrets
@@ -462,20 +462,20 @@ clusterGroup:
         # Uncomment the option matching your supply-chain registry choice.
         # ============================================================
         # OPTION 1: Built-in Quay Registry
-        # - name: app.images.main.name
-        #   value: quay-registry-quay-quay-enterprise.apps.{{ $.Values.global.clusterDomain }}/ztvp/qtodo
-        # - name: app.images.main.version
-        #   value: latest
-        # - name: app.images.main.registry.auth
-        #   value: "true"
-        # - name: app.images.main.registry.domain
-        #   value: quay-registry-quay-quay-enterprise.apps.{{ $.Values.global.clusterDomain }}
-        # - name: app.images.main.registry.user
-        #   value: quay-user
-        # - name: app.images.main.registry.vaultPath
-        #   value: "secret/data/hub/infra/quay/quay-users"
-        # - name: app.images.main.registry.passwordVaultKey
-        #   value: "quay-user-password"
+        - name: app.images.main.name
+          value: quay-registry-quay-quay-enterprise.apps.{{ $.Values.global.clusterDomain }}/ztvp/qtodo
+        - name: app.images.main.version
+          value: latest
+        - name: app.images.main.registry.auth
+          value: "true"
+        - name: app.images.main.registry.domain
+          value: quay-registry-quay-quay-enterprise.apps.{{ $.Values.global.clusterDomain }}
+        - name: app.images.main.registry.user
+          value: quay-user
+        - name: app.images.main.registry.vaultPath
+          value: "secret/data/hub/infra/quay/quay-users"
+        - name: app.images.main.registry.passwordVaultKey
+          value: "quay-user-password"
         # ============================================================
         # OPTION 2: BYO/External Registry
         # - name: app.images.main.name
@@ -513,74 +513,74 @@ clusterGroup:
         # qtodo uses the upstream image from the chart's default values.yaml
         # ============================================================
     # Secure Supply Chain
-    # supply-chain:
-    #   name: supply-chain
-    #   project: hub
-    #   path: charts/supply-chain
-    #   ignoreDifferences:
-    #     - kind: ServiceAccount
-    #       jqPathExpressions:
-    #         - .imagePullSecrets[]|select(.name | contains("-dockercfg-"))
-    #   overrides:
-    #     # ============================================================
-    #     # OPTION 1: Built-in Quay Registry (comment out Option 2, uncomment below)
-    #     # Requires: quay-enterprise namespace, quay-operator, quay-registry app
-    #     # ============================================================
-    #     # - name: quay.enabled
-    #     #   value: "true"
-    #     # - name: registry.enabled
-    #     #   value: "true"
-    #     # - name: registry.domain
-    #     #   value: quay-registry-quay-quay-enterprise.apps.{{ $.Values.global.clusterDomain }}
-    #     # - name: registry.tlsVerify
-    #     #   value: "false"
-    #     # - name: registry.user
-    #     #   value: quay-user
-    #     # - name: registry.vaultPath
-    #     #   value: "secret/data/hub/infra/quay/quay-users"
-    #     # - name: registry.passwordVaultKey
-    #     #   value: "quay-user-password"
-    #     # ============================================================
-    #     # OPTION 2: BYO/External Registry (comment out Option 3, uncomment below)
-    #     # Store token in Vault (hub/infra/registry/registry-user, field registry-password)
-    #     # and in ~/values-secrets.yaml.
-    #     # ============================================================
-    #     # - name: registry.enabled
-    #     #   value: "true"
-    #     # - name: registry.domain
-    #     #   value: quay.io
-    #     # - name: registry.org
-    #     #   value: your-org
-    #     # - name: registry.user
-    #     #   value: your-username
-    #     # - name: registry.vaultPath
-    #     #   value: "secret/data/hub/infra/registry/registry-user"
-    #     # - name: registry.passwordVaultKey
-    #     #   value: "registry-password"
-    #     # ============================================================
-    #     # OPTION 3: Embedded OCP Registry
-    #     # ============================================================
-    #     # - name: registry.enabled
-    #     #   value: "true"
-    #     # - name: registry.domain
-    #     #   value: default-route-openshift-image-registry.apps.{{ $.Values.global.clusterDomain }}
-    #     # - name: registry.org
-    #     #   value: ztvp
-    #     # - name: registry.user
-    #     #   value: admin
-    #     # - name: registry.vaultPath
-    #     #   value: "secret/data/hub/infra/registry/registry-user"
-    #     # - name: registry.passwordVaultKey
-    #     #   value: "registry-password"
-    #     # - name: registry.embeddedOCP.ensureImageNamespaceRBAC
-    #     #   value: "true"
-    #     # ============================================================
-    #     # Enable RHTAS signing
-    #     # - name: rhtas.enabled
-    #     #   value: "true"
-    #     # Enable RHTPA SBOM upload
-    #     # - name: rhtpa.enabled
-    #     #   value: "true"
+    supply-chain:
+      name: supply-chain
+      project: hub
+      path: charts/supply-chain
+      ignoreDifferences:
+        - kind: ServiceAccount
+          jqPathExpressions:
+            - .imagePullSecrets[]|select(.name | contains("-dockercfg-"))
+      overrides:
+        # ============================================================
+        # OPTION 1: Built-in Quay Registry (comment out Option 2, uncomment below)
+        # Requires: quay-enterprise namespace, quay-operator, quay-registry app
+        # ============================================================
+        - name: quay.enabled
+          value: "true"
+        - name: registry.enabled
+          value: "true"
+        - name: registry.domain
+          value: quay-registry-quay-quay-enterprise.apps.{{ $.Values.global.clusterDomain }}
+        - name: registry.tlsVerify
+          value: "false"
+        - name: registry.user
+          value: quay-user
+        - name: registry.vaultPath
+          value: "secret/data/hub/infra/quay/quay-users"
+        - name: registry.passwordVaultKey
+          value: "quay-user-password"
+        # ============================================================
+        # OPTION 2: BYO/External Registry (comment out Option 3, uncomment below)
+        # Store token in Vault (hub/infra/registry/registry-user, field registry-password)
+        # and in ~/values-secrets.yaml.
+        # ============================================================
+        # - name: registry.enabled
+        #   value: "true"
+        # - name: registry.domain
+        #   value: quay.io
+        # - name: registry.org
+        #   value: your-org
+        # - name: registry.user
+        #   value: your-username
+        # - name: registry.vaultPath
+        #   value: "secret/data/hub/infra/registry/registry-user"
+        # - name: registry.passwordVaultKey
+        #   value: "registry-password"
+        # ============================================================
+        # OPTION 3: Embedded OCP Registry
+        # ============================================================
+        # - name: registry.enabled
+        #   value: "true"
+        # - name: registry.domain
+        #   value: default-route-openshift-image-registry.apps.{{ $.Values.global.clusterDomain }}
+        # - name: registry.org
+        #   value: ztvp
+        # - name: registry.user
+        #   value: admin
+        # - name: registry.vaultPath
+        #   value: "secret/data/hub/infra/registry/registry-user"
+        # - name: registry.passwordVaultKey
+        #   value: "registry-password"
+        # - name: registry.embeddedOCP.ensureImageNamespaceRBAC
+        #   value: "true"
+        # ============================================================
+        # Enable RHTAS signing
+        - name: rhtas.enabled
+          value: "true"
+        # Enable RHTPA SBOM upload
+        - name: rhtpa.enabled
+          value: "true"
   argoCD:
     resourceHealthChecks:
       - check: |

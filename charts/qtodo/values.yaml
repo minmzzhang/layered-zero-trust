@@ -15,13 +15,14 @@ app:
       # Modified to Always to force a pull so we can test changes to the container image without requiring manual deletion of images or restarts of argo
       pullPolicy: Always
       registry:
+        # Set to true to create registry auth secret for image pulls
         auth: false
         secretName: qtodo-registry-auth
-        user: quay-user
-        # domain: quay-registry-quay-quay-enterprise.apps.example.com
-        # Registry credentials - stored in quay path
-        vaultPath: secret/data/hub/infra/quay/quay-users
-        passwordVaultKey: quay-user-password
+        user: registry-user
+        # domain: registry.example.com  # REQUIRED when auth is enabled
+        # Vault path and key for registry password (set for your scenario)
+        vaultPath: ""
+        passwordVaultKey: ""
     spiffeHelper:
       name: registry.redhat.io/zero-trust-workload-identity-manager/spiffe-helper-rhel9
       version: v0.10.0

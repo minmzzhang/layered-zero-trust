@@ -370,3 +370,38 @@ keycloak:
     # RHTPA CLI OIDC client secret (infra)
     rhtpaCli:
       vaultPath: secret/data/hub/infra/rhtpa/rhtpa-oidc-cli
+  # SPIFFE Identity Provider (bridges workload identity from SPIRE into Keycloak)
+  # Used for OAuth 2.0 Token Exchange: workloads present SPIFFE JWT SVIDs
+  # and receive Keycloak access tokens in return.
+  spiffeIdentityProvider:
+    enabled: true
+    config:
+      alias: spiffe
+      displayName: SPIFFE Workload Identity
+      providerId: oidc
+      enabled: true
+      trustEmail: false
+      storeToken: true
+      firstBrokerLoginFlowAlias: first broker login
+      config:
+        hideOnLoginPage: "true"
+        issuer: https://spire-spiffe-oidc-discovery-provider.apps.example.com
+        authorizationUrl: https://spire-spiffe-oidc-discovery-provider.apps.example.com/authorize
+        tokenUrl: https://spire-spiffe-oidc-discovery-provider.apps.example.com/token
+        clientId: keycloak
+        clientSecret: ""
+        clientAuthMethod: client_secret_post
+        defaultScope: openid
+        useJwksUrl: "true"
+        jwksUrl: https://spire-spiffe-oidc-discovery-provider.zero-trust-workload-identity-manager.svc.cluster.local/keys
+        validateSignature: "true"
+        syncMode: FORCE
+        disableUserInfo: "true"
+    mappers:
+    - name: spiffe-id-mapper
+      identityProviderAlias: spiffe
+      identityProviderMapper: oidc-user-attribute-idp-mapper
+      config:
+        claim: sub
+        user.attribute: spiffeId
+        syncMode: FORCE

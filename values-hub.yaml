@@ -424,6 +424,14 @@ clusterGroup:
       namespace: keycloak-system
       project: hub
       path: charts/keycloak
+      overrides:
+        # SPIFFE Identity Provider - set issuer URLs to match cluster domain
+        - name: keycloak.spiffeIdentityProvider.config.config.issuer
+          value: "https://spire-spiffe-oidc-discovery-provider.apps.{{ $.Values.global.clusterDomain }}"
+        - name: keycloak.spiffeIdentityProvider.config.config.authorizationUrl
+          value: "https://spire-spiffe-oidc-discovery-provider.apps.{{ $.Values.global.clusterDomain }}/authorize"
+        - name: keycloak.spiffeIdentityProvider.config.config.tokenUrl
+          value: "https://spire-spiffe-oidc-discovery-provider.apps.{{ $.Values.global.clusterDomain }}/token"
     rh-cert-manager:
       name: rh-cert-manager
       namespace: cert-manager-operator

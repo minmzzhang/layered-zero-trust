@@ -6,6 +6,16 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "5"
 spec:
+{{- if .Values.keycloak.spiffeIdentityProvider.enabled }}
+  features:
+    enabled:
+      - spiffe
+      - client-auth-federated
+  truststores:
+    spire-ca:
+      secret:
+        name: {{ (.Values.keycloak.spiffeIdentityProvider.spireCa).secretName | default "spire-ca-bundle" }}
+{{- end }}
 {{- if eq .Values.keycloak.adminUser.enabled true }}
   bootstrapAdmin:
     user:

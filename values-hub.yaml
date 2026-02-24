@@ -84,7 +84,7 @@ clusterGroup:
     rhbk:
       name: rhbk-operator
       namespace: keycloak-system
-      channel: stable-v26.2
+      channel: stable-v26.4
       catalogSource: redhat-marketplace
     zero-trust-workload-identity-manager:
       name: openshift-zero-trust-workload-identity-manager
@@ -418,13 +418,13 @@ clusterGroup:
       overrides:
         - name: keycloak.spiffeIdentityProvider.enabled
           value: "true"
-        # Custom SPIFFE OIDC discovery URLs (auto-generated from cluster domain by default)
+        # Custom SPIFFE trust domain and bundle endpoint (auto-generated from cluster domain by default)
+        # issuer defaults to: spiffe://<localClusterDomain>
+        # bundleEndpoint defaults to: https://federation.<localClusterDomain>
         # - name: keycloak.spiffeIdentityProvider.config.config.issuer
-        #   value: "https://spire-spiffe-oidc-discovery-provider.apps.example.com"
-        # - name: keycloak.spiffeIdentityProvider.config.config.authorizationUrl
-        #   value: "https://spire-spiffe-oidc-discovery-provider.apps.example.com/authorize"
-        # - name: keycloak.spiffeIdentityProvider.config.config.tokenUrl
-        #   value: "https://spire-spiffe-oidc-discovery-provider.apps.example.com/token"
+        #   value: "spiffe://apps.example.com"
+        # - name: keycloak.spiffeIdentityProvider.config.config.bundleEndpoint
+        #   value: "https://federation.apps.example.com"
     rh-cert-manager:
       name: rh-cert-manager
       namespace: cert-manager-operator

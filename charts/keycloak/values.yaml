@@ -370,35 +370,41 @@ keycloak:
     # RHTPA CLI OIDC client secret (infra)
     rhtpaCli:
       vaultPath: secret/data/hub/infra/rhtpa/rhtpa-oidc-cli
-  # SPIFFE Identity Provider (bridges workload identity from SPIRE into Keycloak)
-  # Used for OAuth 2.0 Token Exchange: workloads present SPIFFE JWT SVIDs
-  # and receive Keycloak access tokens in return.
+  # SPIFFE Identity Provider for Federated Client Authentication
+  # Requires RHBK 26.4+ with Technology Preview features: spiffe + client-auth-federated
+  # (automatically enabled in keycloak.yaml when this is enabled)
+  #
+  # Enables two capabilities:
+  # 1. Federated Client Authentication: Clients authenticate to Keycloak using
+  #    SPIFFE JWT SVIDs instead of client secrets (clientAuthenticatorType: federated-jwt)
+  # 2. Token Exchange: Workloads exchange SPIFFE JWT SVIDs for Keycloak access tokens
+  #
+  # Reference: https://www.keycloak.org/2026/01/federated-client-authentication
+  # Playground: https://github.com/keycloak/keycloak-playground/tree/main/federated-client-authentication/spiffe
   spiffeIdentityProvider:
     enabled: false
+    # SPIRE CA certificate for TLS trust between Keycloak and the bundle endpoint.
+    # The federation route uses passthrough TLS with SPIRE's own CA, so Keycloak
+    # needs this CA in its truststore. A PreSync Job copies the CA from the SPIRE
+    # bundle ConfigMap to a Secret that the Keycloak CR references via spec.truststores.
+    spireCa:
+      sourceNamespace: zero-trust-workload-identity-manager
+      sourceConfigMap: spire-bundle
+      sourceKey: bundle.crt
+      secretName: spire-ca-bundle
     config:
       alias: spiffe
       displayName: SPIFFE Workload Identity
-      providerId: oidc
+      providerId: spiffe
       enabled: true
-      trustEmail: false
-      storeToken: true
-      firstBrokerLoginFlowAlias: first broker login
       config:
-        hideOnLoginPage: "true"
-        clientId: keycloak
-        clientSecret: ""
-        clientAuthMethod: client_secret_post
-        defaultScope: openid
-        useJwksUrl: "true"
-        jwksUrl: https://spire-spiffe-oidc-discovery-provider.zero-trust-workload-identity-manager.svc.cluster.local/keys
-        validateSignature: "true"
-        syncMode: FORCE
-        disableUserInfo: "true"
-    mappers:
-    - name: spiffe-id-mapper
-      identityProviderAlias: spiffe
-      identityProviderMapper: oidc-user-attribute-idp-mapper
-      config:
-        claim: sub
-        user.attribute: spiffeId
-        syncMode: FORCE
+        # SPIFFE trust domain in URI format (auto-generated from global.localClusterDomain if empty)
+        # Keycloak stores this under the "issuer" config key internally
+        # Format: spiffe://<localClusterDomain>
+        issuer: ""
+        # SPIFFE Bundle Endpoint URL (auto-generated from global.localClusterDomain if empty)
+        # Defaults to the SPIRE Server federation route: https://federation.<localClusterDomain>
+        # Must serve a JWKS with keys having use: "jwt-svid" (required by Keycloak's
+        # SpiffeBundleEndpointLoader). The OIDC Discovery Provider /keys endpoint will
+        # NOT work as its keys lack the jwt-svid use field.
+        bundleEndpoint: ""

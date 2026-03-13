@@ -16,4 +16,5 @@ github_conf
 
 # Editor and IDE specific files
 .cursorrules
+.cursor/
 .vscode/

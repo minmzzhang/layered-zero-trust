@@ -15,9 +15,19 @@ help:
 install: operator-deploy post-install ## installs the pattern and loads the secrets
 	@echo "Installed"
 
+.PHONY: wait-mcp
+wait-mcp: ## Wait for MachineConfigPool rollout (skipped on HCP)
+	@if oc get mcp/master >/dev/null 2>&1; then \
+		echo "MachineConfigPool found — waiting for rollout to complete..."; \
+		oc wait mcp/master --for=condition=Updated --timeout=600s; \
+	else \
+		echo "No MachineConfigPool — skipping (HCP or managed environment)"; \
+	fi
+
 .PHONY: post-install
 post-install: ## Post-install tasks
 	make load-secrets
+	make wait-mcp
 	make vault-config-jwt
 	@echo "Done"
 

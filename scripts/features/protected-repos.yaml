@@ -14,3 +14,5 @@ clusterGroup:
           value: "https://github.com"
         - name: git.credentials.vaultPath
           value: "secret/data/hub/supply-chain/git-credentials"
+        - name: qtodo.repository
+          value: "REPLACE_WITH_GIT_REPO_URL"

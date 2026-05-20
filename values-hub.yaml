@@ -609,6 +609,8 @@ clusterGroup:
     #    #   value: "https://github.com"
     #    # - name: git.credentials.vaultPath
     #    #   value: "secret/data/hub/supply-chain/git-credentials"
+    #    # - name: qtodo.repository
+    #    #   value: "https://github.com/your-org/qtodo.git"
     #
     # ACS Central Services
     acs-central:

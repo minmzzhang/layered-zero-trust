@@ -16,6 +16,14 @@ clusterGroup:
         - kind: ServiceAccount
           jqPathExpressions:
             - ".imagePullSecrets[]|select(.name | contains(\"-dockercfg-\"))"
+        - group: tekton.dev
+          kind: Task
+          jsonPointers:
+            - /spec/steps
+        - group: tekton.dev
+          kind: Pipeline
+          jsonPointers:
+            - /spec/tasks
 
   merge_into_applications:
     vault:

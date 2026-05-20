@@ -108,10 +108,10 @@ spec:
   results:
     - name: CHAINS-GIT_URL
       description: The git URL used for the build (Tekton Chains provenance)
-      value: $(tasks.qtodo-clone-repository.results.url)
+      value: $(tasks.qtodo-clone-repository.results.URL)
     - name: CHAINS-GIT_COMMIT
       description: The git commit SHA used for the build (Tekton Chains provenance)
-      value: $(tasks.qtodo-clone-repository.results.commit)
+      value: $(tasks.qtodo-clone-repository.results.COMMIT)
     - name: IMAGE_URL
       description: The image URL built by the pipeline (Tekton Chains provenance)
       value: $(tasks.qtodo-build-image.results.IMAGE_URL)

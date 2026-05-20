@@ -1,6 +1,9 @@
 # Secure Supply Chain application + vault role
 # Depends on: pipelines, rhtas, rhtpa, storage (all resolved automatically)
 # Requires --registry-option to select the registry backend.
+#
+# Optional: add --features protected-repos to enable private Git repository
+# support (see scripts/features/protected-repos.yaml).
 clusterGroup:
   applications:
     supply-chain:

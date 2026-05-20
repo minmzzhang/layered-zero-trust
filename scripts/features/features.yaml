@@ -33,6 +33,10 @@ features:
     org: ztvp
     image_name: qtodo
 
+  protected-repos:
+    description: "Protected (private) Git repository support for supply-chain"
+    depends_on: [supply-chain]
+
   entra-id:
     description: "Azure Entra ID integration"
     depends_on: [supply-chain]

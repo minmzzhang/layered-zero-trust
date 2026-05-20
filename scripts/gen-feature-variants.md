@@ -57,6 +57,9 @@ python3 scripts/gen-feature-variants.py --features supply-chain --registry-optio
 # Generate all three supply-chain registry variants at once
 python3 scripts/gen-feature-variants.py --features supply-chain --registry-option all
 
+# Supply chain with protected (private) Git repository support
+python3 scripts/gen-feature-variants.py --features supply-chain,protected-repos --registry-option 2
+
 # Custom base file and output directory
 python3 scripts/gen-feature-variants.py \
     --features rhtpa --base values-hub.yaml --outdir /tmp

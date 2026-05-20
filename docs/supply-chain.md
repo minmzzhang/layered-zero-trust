@@ -354,22 +354,30 @@ Add the following overrides to the `supply-chain` application in `values-hub.yam
   value: "secret/data/hub/supply-chain/git-credentials"
 ```
 
-Alternatively, if you use the `gen-feature-variants.py` script, add `protected-repos` to the features list and these overrides are included automatically:
+Alternatively, if you use the `gen-feature-variants.py` script, add `protected-repos` to the features list and provide your private repository URL with `--git-repo`. The git credential overrides and the `qtodo.repository` override are included automatically:
 
 ```shell
-python3 scripts/gen-feature-variants.py --features supply-chain,protected-repos --registry-option <id>
+python3 scripts/gen-feature-variants.py \
+  --features supply-chain,protected-repos \
+  --registry-option <id> \
+  --git-repo https://github.com/your-org/qtodo.git
 ```
 
 #### 3. Point the pipeline at your private repository
 
-Override the default qtodo repository URL in the `PipelineRun` parameters or change `qtodo.repository` in `charts/supply-chain/values.yaml` to point to your private fork.
+When using the generator with `--git-repo`, the `qtodo.repository` override is set automatically in the generated `values-hub.yaml`. If you are configuring manually, add this override to the `supply-chain` application:
+
+```yaml
+- name: qtodo.repository
+  value: "https://github.com/your-org/qtodo.git"
+```
 
 #### How it works
 
 When `git.credentials.enabled` is `true`:
 
-* An `ExternalSecret` (`qtodo-git-credentials`) pulls the username and PAT from Vault and creates a `kubernetes.io/basic-auth` secret annotated with `tekton.dev/git-0` pointing to the configured host.
-* The pipeline ServiceAccount mounts this secret, and the `git-clone` task receives it via the optional `git-auth` / `basic-auth` workspace.
+* An `ExternalSecret` (`qtodo-git-credentials`) pulls the username and PAT from Vault and creates an `Opaque` secret containing `.git-credentials` and `.gitconfig` files, annotated with `tekton.dev/git-0` pointing to the configured host.
+* The pipeline ServiceAccount mounts this secret, and the `git-clone` task receives it via the optional `git-auth` / `basic-auth` workspace. When starting a PipelineRun, select `Secret` / `qtodo-git-credentials` for the **git-auth** workspace.
 * The Vault policy `hub-supply-chain-jwt-secret` grants read access to `secret/data/hub/supply-chain/*` for the pipeline's SPIFFE identity.
 
 ### Init task (pre-flight image check)

@@ -338,8 +338,7 @@ clusterGroup:
       name: rh-keycloak
       namespace: keycloak-system
       project: hub
-      chart: rhbk
-      chartVersion: 0.0.*
+      path: charts/rh-keycloak
       annotations:
         argocd.argoproj.io/sync-wave: "35"
     rh-cert-manager:

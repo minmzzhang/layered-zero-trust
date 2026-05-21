@@ -1,0 +1,6 @@
+dependencies:
+- name: rhbk
+  repository: file://../../../rhbk-chart
+  version: 0.0.8
+digest: sha256:b01b8e1774285675a6465bfb990a27bd05a67cabc97cfa8192c650d8ad9e5a84
+generated: "2026-05-21T14:20:53.312171939-04:00"

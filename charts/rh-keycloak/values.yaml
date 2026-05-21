@@ -1,0 +1,17 @@
+# PostSync cleanup for ephemeral Secrets.
+# When enabled, a PostSync Job deletes all Secrets matching the configured
+# label in this namespace. ExternalSecrets are handled by ArgoCD's
+# HookSucceeded mechanism (they self-delete after sync); the Secrets they
+# created are orphaned via deletionPolicy: Retain and cleaned up here.
+cleanup:
+  enabled: true
+  image: registry.redhat.io/openshift4/ose-cli-rhel9:latest
+  label: "ztvp.io/cleanup"
+  labelValue: "true"
+  activeDeadlineSeconds: 120
+
+# Values passed through to the rhbk subchart.
+rhbk:
+  externalSecrets:
+    oneShot: true
+    secretCleanupLabel: "ztvp.io/cleanup"

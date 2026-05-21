@@ -1,0 +1,18 @@
+apiVersion: v2
+name: rh-keycloak
+description: ZTVP Keycloak deployment — wraps the rhbk chart and adds PostSync cleanup for one-shot ExternalSecrets
+type: application
+version: 0.1.0
+dependencies:
+  - name: rhbk
+    version: ">=0.0.8"
+    # TODO: switch back to oci://quay.io/validatedpatterns after publishing rhbk-chart with oneShot support
+    repository: "file://../../../rhbk-chart"
+maintainers:
+  - name: Zero Trust Validated Patterns Team
+    email: ztvp-arch-group@redhat.com
+keywords:
+  - keycloak
+  - rhbk
+  - zero-trust
+  - pattern

@@ -320,7 +320,7 @@ oc logs -n layered-zero-trust-hub -l tekton.dev/pipelineRun=<pipelinerun-name>,t
 
 ### Protected Repositories
 
-By default the pipeline clones the qtodo source from a **public** GitHub repository. If your source code lives in a private (protected) repository, enable the git credentials feature so the `git-clone` task can authenticate.
+By default the pipeline clones the qtodo source from a **public** GitHub repository. If your source code lives in a private (protected) repository, enable the Git credentials feature so the `git-clone` task can authenticate.
 
 #### 1. Store Git credentials in Vault
 
@@ -341,7 +341,7 @@ Uncomment the `git-credentials` secret in your local `~/values-secret.yaml` (cop
 
 Then load the secret into Vault: `make load-secrets`.
 
-#### 2. Enable git credentials in the supply-chain overrides
+#### 2. Enable Git credentials in the supply-chain overrides
 
 Add the following overrides to the `supply-chain` application in `values-hub.yaml`:
 
@@ -354,7 +354,7 @@ Add the following overrides to the `supply-chain` application in `values-hub.yam
   value: "secret/data/hub/supply-chain/git-credentials"
 ```
 
-Alternatively, if you use the `gen-feature-variants.py` script, add `protected-repos` to the features list and provide your private repository URL with `--git-repo`. The git credential overrides and the `qtodo.repository` override are included automatically:
+Alternatively, if you use the `gen-feature-variants.py` script, add `protected-repos` to the features list and provide your private repository URL with `--git-repo`. The Git credential overrides and the `qtodo.repository` override are included automatically:
 
 ```shell
 python3 scripts/gen-feature-variants.py \

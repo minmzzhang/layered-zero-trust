@@ -5,11 +5,11 @@
 cleanup:
   enabled: true
   image: registry.redhat.io/openshift4/ose-cli-rhel9:latest
-  label: "ztvp.io/cleanup"
+  label: "validatedpatterns.io/cleanup"
   activeDeadlineSeconds: 120
 
 # Values passed through to the rhbk subchart.
 rhbk:
   externalSecrets:
     oneShot: true
-    secretCleanupLabel: "ztvp.io/cleanup"
+    secretCleanupLabel: "validatedpatterns.io/cleanup"

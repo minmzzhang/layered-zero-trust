@@ -1,7 +1,7 @@
 # PostSync cleanup for ephemeral Secrets.
-# When enabled, a PostSync Job deletes the keycloak-users ExternalSecret
-# with --cascade=orphan (so the Secret survives), then removes Secrets
-# labeled for deletion (keycloak-users).
+# When enabled, a PostSync Job deletes Secrets labeled for cleanup
+# (e.g. keycloak-users) after the realm import completes.
+# The ExternalSecret itself is removed by ArgoCD's HookSucceeded policy.
 cleanup:
   enabled: true
   image: registry.redhat.io/openshift4/ose-cli-rhel9:latest

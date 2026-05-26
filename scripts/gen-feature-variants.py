@@ -35,8 +35,10 @@ Usage:
 import argparse
 import copy
 import os
+import re
 import sys
 from collections import OrderedDict
+from urllib.parse import urlparse
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
@@ -268,19 +270,40 @@ def _substitute_repository_placeholders(base, org=None, image_name=None):
 
 
 GIT_REPO_PLACEHOLDER = "REPLACE_WITH_GIT_REPO_URL"
+GIT_HOST_PLACEHOLDER = "REPLACE_WITH_GIT_HOST"
+GIT_AUTH_TYPE_PLACEHOLDER = "REPLACE_WITH_GIT_AUTH_TYPE"
+
+SSH_URL_RE = re.compile(r"^[\w.-]+@([\w.-]+):")
 
 
-def _substitute_git_repo_url(base, git_repo_url):
-    """Replace the git repo placeholder in supply-chain overrides."""
+def _parse_git_repo_url(git_repo_url):
+    """Derive (host, auth_type) from a Git repository URL.
+
+    HTTPS URLs  -> host = "https://github.com",  auth_type = "https"
+    SSH URLs    -> host = "github.com",           auth_type = "ssh"
+    """
+    m = SSH_URL_RE.match(git_repo_url)
+    if m:
+        return m.group(1), "ssh"
+    parsed = urlparse(git_repo_url)
+    scheme = parsed.scheme or "https"
+    hostname = parsed.hostname or ""
+    return f"{scheme}://{hostname}", "https"
+
+
+def _substitute_git_overrides(base, git_repo_url, git_host, git_auth_type):
+    """Replace git-related placeholders in supply-chain overrides."""
     apps = base.get("clusterGroup", {}).get("applications", {})
     sc = apps.get("supply-chain", {})
+    placeholder_map = {
+        "qtodo.repository": (GIT_REPO_PLACEHOLDER, git_repo_url),
+        "git.credentials.host": (GIT_HOST_PLACEHOLDER, git_host),
+        "git.credentials.authType": (GIT_AUTH_TYPE_PLACEHOLDER, git_auth_type),
+    }
     for override in sc.get("overrides", []):
-        if (
-            override.get("name") == "qtodo.repository"
-            and str(override.get("value")) == GIT_REPO_PLACEHOLDER
-        ):
-            override["value"] = git_repo_url
-            return
+        entry = placeholder_map.get(override.get("name"))
+        if entry and str(override.get("value")) == entry[0]:
+            override["value"] = entry[1]
 
 
 def generate_variant(
@@ -324,7 +347,8 @@ def generate_variant(
         _substitute_repository_placeholders(base, org=org, image_name=image_name)
 
     if git_repo_url:
-        _substitute_git_repo_url(base, git_repo_url)
+        git_host, git_auth_type = _parse_git_repo_url(git_repo_url)
+        _substitute_git_overrides(base, git_repo_url, git_host, git_auth_type)
 
     validate_output(base)
     cg = base.get("clusterGroup")

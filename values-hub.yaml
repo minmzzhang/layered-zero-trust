@@ -615,8 +615,10 @@ clusterGroup:
     #    # Protected repository credentials (Vault + ExternalSecret)
     #    # - name: git.credentials.enabled
     #    #   value: "true"
+    #    # - name: git.credentials.authType
+    #    #   value: "https"              # "https" (basic-auth) or "ssh"
     #    # - name: git.credentials.host
-    #    #   value: "https://github.com"
+    #    #   value: "https://github.com" # SSH: "github.com" (no scheme)
     #    # - name: git.credentials.vaultPath
     #    #   value: "secret/data/hub/supply-chain/git-credentials"
     #    # - name: qtodo.repository

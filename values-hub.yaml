@@ -482,13 +482,13 @@ clusterGroup:
       - name: git.credentials.enabled
         value: "true"
       - name: git.credentials.authType
-        value: "ssh"
+        value: "https"
       - name: git.credentials.host
-        value: "github.com"
+        value: "https://github.com"
       - name: git.credentials.vaultPath
         value: "secret/data/hub/supply-chain/git-credentials"
       - name: qtodo.repository
-        value: "git@github.com:minmzzhang/qtodo.git"
+        value: "https://github.com/minmzzhang/qtodo.git"
       - name: registry.embeddedOpenShift.ensureImageNamespaceRBAC
         value: "true"
       - name: registry.embeddedOpenShift.tokenRefresher.enabled

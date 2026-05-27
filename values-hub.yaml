@@ -50,12 +50,12 @@ spire:
 global:
   registry:
     enabled: true
-    domain: "quay-registry-quay-quay-enterprise.apps.{{ .Values.global.clusterDomain }}"
+    domain: "default-route-openshift-image-registry.apps.{{ .Values.global.clusterDomain }}"
     # Placeholders auto-replaced by the generator (supply-chain defines org=ztvp, image_name=qtodo)
     repository: ztvp/qtodo
-    user: quay-user
-    vaultPath: "secret/data/hub/infra/quay/quay-users"
-    passwordVaultKey: "quay-user-password"
+    user: _token
+    vaultPath: "secret/data/hub/infra/registry/registry-user"
+    passwordVaultKey: "registry-password"
 
 clusterGroup:
   name: hub
@@ -102,11 +102,6 @@ clusterGroup:
       annotations:
         argocd.argoproj.io/sync-wave: "26"
   - trusted-profile-analyzer:
-      annotations:
-        argocd.argoproj.io/sync-wave: "32"
-      labels:
-        openshift.io/cluster-monitoring: "true"
-  - quay-enterprise:
       annotations:
         argocd.argoproj.io/sync-wave: "32"
       labels:
@@ -168,12 +163,6 @@ clusterGroup:
       catalogSource: redhat-operators
       annotations:
         argocd.argoproj.io/sync-wave: "27"
-    quay-operator:
-      name: quay-operator
-      namespace: openshift-operators
-      channel: stable-3.15
-      annotations:
-        argocd.argoproj.io/sync-wave: "28"
   projects:
   - hub
   # Explicitly mention the cluster-state based overrides we plan to use for this pattern.
@@ -230,7 +219,7 @@ clusterGroup:
       - name: imagePullTrust.enabled
         value: "true"
       - name: imagePullTrust.registries[0]
-        value: "quay-registry-quay-quay-enterprise.apps.{{ $.Values.global.clusterDomain }}"
+        value: "default-route-openshift-image-registry.apps.{{ $.Values.global.clusterDomain }}"
     acm:
       name: acm
       namespace: open-cluster-management
@@ -499,28 +488,15 @@ clusterGroup:
       - name: git.credentials.vaultPath
         value: "secret/data/hub/supply-chain/git-credentials"
       - name: qtodo.repository
-        value: "https://github.com/minmzzhang/qtodo"
-      - name: quay.enabled
+        value: "https://github.com/minmzzhang/qtodo.git"
+      - name: registry.embeddedOpenShift.ensureImageNamespaceRBAC
         value: "true"
-      - name: registry.tlsVerify
-        value: "false"
+      - name: registry.embeddedOpenShift.tokenRefresher.enabled
+        value: "true"
       - name: rhtas.enabled
         value: "true"
       - name: rhtpa.enabled
         value: "true"
-    quay-registry:
-      name: quay-registry
-      namespace: quay-enterprise
-      project: hub
-      chart: quay
-      chartVersion: 0.1.*
-      annotations:
-        argocd.argoproj.io/sync-wave: "41"
-      overrides:
-      - name: job.image
-        value: "registry.redhat.io/openshift4/ose-cli-rhel9:latest"
-      - name: job.resources.limits.memory
-        value: "512Mi"
   argoCD:
     resourceHealthChecks:
     - check: |

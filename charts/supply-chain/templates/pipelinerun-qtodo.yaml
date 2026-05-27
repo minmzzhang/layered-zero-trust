@@ -24,7 +24,7 @@ rules:
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get"]
-  resourceNames: [{{ .Values.registry.authSecretName | quote }}{{- if .Values.git.credentials.enabled }}, "qtodo-git-credentials"{{- end }}]
+  resourceNames: [{{ .Values.registry.authSecretName | quote }}]
 - apiGroups: [""]
   resources: ["persistentvolumeclaims"]
   verbs: ["get"]
@@ -107,11 +107,6 @@ spec:
               - name: registry-auth-config
                 secret:
                   secretName: {{ .Values.registry.authSecretName }}
-{{- if .Values.git.credentials.enabled }}
-              - name: git-auth
-                secret:
-                  secretName: qtodo-git-credentials
-{{- end }}
           MANIFEST
           echo "PipelineRun created successfully."
 {{- end }}

@@ -484,11 +484,11 @@ clusterGroup:
       - name: git.credentials.authType
         value: "https"
       - name: git.credentials.host
-        value: "https://github.com"
+        value: "https://gitlab.cee.redhat.com"
       - name: git.credentials.vaultPath
         value: "secret/data/hub/supply-chain/git-credentials"
       - name: qtodo.repository
-        value: "https://github.com/minmzzhang/qtodo.git"
+        value: "https://gitlab.cee.redhat.com/minzhang/qtodo.git"
       - name: registry.embeddedOpenShift.ensureImageNamespaceRBAC
         value: "true"
       - name: registry.embeddedOpenShift.tokenRefresher.enabled

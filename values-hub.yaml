@@ -139,7 +139,7 @@ clusterGroup:
       name: openshift-zero-trust-workload-identity-manager
       namespace: zero-trust-workload-identity-manager
       channel: stable-v1
-      catalogSource: ztwim-catalog
+      source: ztwim-catalog
     compliance-operator:
       name: compliance-operator
       namespace: openshift-compliance

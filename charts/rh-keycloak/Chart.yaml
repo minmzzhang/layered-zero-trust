@@ -6,7 +6,7 @@ version: 0.2.0
 dependencies:
   - name: rhbk
     version: ">=0.1.0"
-    repository: "oci://quay.io/validatedpatterns"
+    repository: "oci://quay.io/ablock"
 maintainers:
   - name: Zero Trust Validated Patterns Team
     email: ztvp-arch-group@redhat.com
